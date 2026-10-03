@@ -6,9 +6,9 @@ doki was created to make watching anime with [Anime4K](https://github.com/bloc97
 
 Download `doki-Windows-x64.zip` from the latest GitHub release, extract the whole folder, and double-click **doki.exe**. Chromium and JetBrains Mono Nerd Font are bundled; no Python setup is needed.
 
-**mpv must be installed separately.** Make sure `mpv.exe` is on `PATH` or registered with Windows before starting playback.
+**mpv must be installed separately.** See installation instructions on [Anime4K](https://github.com/bloc97/anime4k). Make sure `mpv.exe` is on `PATH` or registered with Windows before starting playback.
 
-Paste an episode or player URL and choose **Find stream**. You don't need to play the stream, as the app *should* find the M3U8 anyways!
+Paste an episode or player URL and choose **Find stream**. You don't need to play the stream, as the app *should* find the M3U8 and English subs (if available) anyways!
 
 ## Build on Windows
 
