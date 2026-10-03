@@ -1,6 +1,6 @@
 # doki
 
-A cozy Windows app that finds an HLS stream on an episode page and opens it in mpv, with quality and subtitle selection.
+doki was created to make watching anime with [Anime4K](https://github.com/bloc97/anime4k) on MPV easier and more convenient. It also lets you watch episodes without dealing with the ads, popups, and other distractions commonly found on streaming sites.
 
 ## Download and run
 
@@ -8,7 +8,7 @@ Download `doki-Windows-x64.zip` from the latest GitHub release, extract the whol
 
 **mpv must be installed separately.** Make sure `mpv.exe` is on `PATH` or registered with Windows before starting playback.
 
-Paste an episode or player URL and choose **Find stream**. If needed, press Play in the browser window while the app looks for the stream.
+Paste an episode or player URL and choose **Find stream**. You don't need to play the stream, as the app *should* find the M3U8 anyways!
 
 ## Build on Windows
 
