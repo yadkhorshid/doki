@@ -37,8 +37,8 @@ class M3u8App:
         self.recent_options = {}
 
         root.title("doki")
-        root.geometry("840x830")
-        root.minsize(720, 816)
+        root.geometry("840x862")
+        root.minsize(720, 862)
         root.overrideredirect(True)
         root.configure(bg="#d8cdbd")
 
@@ -125,6 +125,7 @@ class M3u8App:
         style.configure("Title.TLabel", background=background, foreground=ink, font=(font_family, 25, "bold"))
         style.configure("Subtitle.TLabel", background=background, foreground=muted, font=(font_family, 10))
         style.configure("Muted.TLabel", background=background, foreground=muted, font=(font_family, 9))
+        style.configure("Hint.TLabel", background=card, foreground=muted, font=(font_family, 9))
         style.configure("Muted.TCheckbutton", background=background, foreground=muted, font=(font_family, 9))
         style.map("Muted.TCheckbutton", background=[("active", background)], indicatorcolor=[("selected", green), ("!selected", card)])
         style.configure("TButton", font=(font_family, 10, "bold"), padding=(14, 9), background="#e9e4d9", foreground=ink, borderwidth=0)
@@ -326,6 +327,16 @@ class M3u8App:
             playback, textvariable=self.anime4k_var, values=list(self.anime4k_options), state="readonly"
         )
         self.anime4k_combo.grid(row=5, column=0, columnspan=2, sticky="ew")
+        ttk.Label(
+            playback,
+            text=(
+                "Auto uses Mode A+A for 1080p: best quality, but heavy on the GPU. If it stutters, "
+                "pick Mode A or a Fast preset (Ctrl+1 in the player switches to Mode A)."
+            ),
+            style="Hint.TLabel",
+            wraplength=680,
+            justify="left",
+        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         footer = ttk.Frame(body, style="App.TFrame")
         footer.grid(row=5, column=0, sticky="ew", pady=(18, 0))
