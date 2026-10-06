@@ -13,11 +13,17 @@ from urllib.parse import urlsplit
 
 from . import anime4k
 from .capture import capture_page
-from .hls import make_quality_options, parse_hls_playlist, parse_hls_variants
+from .hls import make_quality_options, parse_hls_subtitle_tracks, parse_hls_variants
 from .library import add_history_entry, format_timestamp, make_resume_arguments, next_episode_url, read_resume_position
 from .mpv import find_mpv_executable, launch_in_new_powershell, launch_mpv, make_mpv_arguments, make_mpv_command
 from .paths import IS_MAC, data_path, load_json, resource_path, save_json
-from .subtitles import make_subtitle_options, remove_stale_subtitles, save_captured_subtitle
+from .subtitles import (
+    language_name,
+    make_subtitle_options,
+    preferred_subtitle_label,
+    remove_stale_subtitles,
+    save_captured_subtitle,
+)
 
 
 def register_mac_fonts(font_paths):
@@ -671,7 +677,7 @@ class M3u8App:
             streams,
             key=lambda item: ("#EXT-X-STREAM-INF:" in item[2], len(item[2])),
         )
-        _, hls_subtitles = parse_hls_playlist(self.stream_url, self.playlist_text)
+        hls_tracks = parse_hls_subtitle_tracks(self.stream_url, self.playlist_text)
 
         self.quality_options = dict(make_quality_options(self.stream_url, self.playlist_text))
         quality_labels = list(self.quality_options)
@@ -679,22 +685,21 @@ class M3u8App:
         preferred_quality = self.settings.get("quality")
         self.quality_var.set(preferred_quality if preferred_quality in quality_labels else quality_labels[0])
 
-        subtitle_choices = make_subtitle_options(subtitle_candidates, hls_subtitles)
+        subtitle_choices = make_subtitle_options(subtitle_candidates, hls_tracks)
         self.subtitle_options = {label: selection for label, selection in subtitle_choices}
-        subtitle_labels = list(self.subtitle_options)
-        self.subtitle_combo.configure(values=subtitle_labels)
-        preferred_subtitle = next(
-            (label for label, selection in subtitle_choices if selection["kind"] == "playlist"),
-            None,
-        )
-        if preferred_subtitle is None:
-            preferred_subtitle = next(
-                (label for label, selection in subtitle_choices if selection.get("english")),
-                subtitle_labels[0],
+        self.subtitle_combo.configure(values=list(self.subtitle_options))
+        preferred_subtitle = None
+        if self.settings.get("subtitles") != "none":
+            preferred_subtitle = (
+                preferred_subtitle_label(subtitle_choices, self.settings.get("subtitle_language", "en"))
+                or preferred_subtitle_label(subtitle_choices, "en")
             )
-        if self.settings.get("subtitles") == "none":
-            preferred_subtitle = "No subtitles"
-        self.subtitle_var.set(preferred_subtitle)
+        self.subtitle_var.set(preferred_subtitle or "No subtitles")
+        subtitle_languages = sorted({
+            language_name(selection["language"])
+            for selection in self.subtitle_options.values()
+            if selection["kind"] != "none" and selection["language"]
+        })
 
         variant_count = len(parse_hls_variants(self.stream_url, self.playlist_text))
         detail = f"HTTP {response_status} {content_type or ''}".strip()
@@ -702,6 +707,8 @@ class M3u8App:
             detail += f" - {variant_count} quality options"
         if player_video_size and player_video_size[0] and player_video_size[1]:
             detail += f" - detected {player_video_size[0]}x{player_video_size[1]}"
+        if subtitle_languages:
+            detail += " - subtitles: " + ", ".join(subtitle_languages)
         self.status_var.set(f"Stream ready: {detail}")
         self.start_button.state(["!disabled"])
 
@@ -746,12 +753,15 @@ class M3u8App:
             "initial_buffer": initial_buffer,
             "quality": self.quality_var.get(),
             "subtitles": "none" if selection["kind"] == "none" else "auto",
+            "subtitle_language": selection["language"] or self.settings.get("subtitle_language", "en"),
             "anime4k": self.anime4k_var.get(),
         })
         save_json("settings.json", self.settings)
         subtitle_urls = ()
         cleanup_paths = []
         subtitles_enabled = selection["kind"] != "none"
+        subtitle_languages = selection.get("slang") or ["en"]
+        subtitle_track = selection["sid"] if selection["kind"] == "playlist" and not selection["language"] else None
         if selection["kind"] == "external":
             subtitle_url = selection["url"]
             _, _, subtitle_responses, _ = self.capture_result
@@ -772,6 +782,8 @@ class M3u8App:
             subtitles_enabled=subtitles_enabled,
             extra_args=extra_args,
             debug=debug,
+            subtitle_languages=subtitle_languages,
+            subtitle_track=subtitle_track,
         )
         launch_executable, launch_arguments = make_mpv_arguments(
             self.stream_url,
@@ -785,12 +797,14 @@ class M3u8App:
             subtitles_enabled=subtitles_enabled,
             extra_args=extra_args,
             debug=debug,
+            subtitle_languages=subtitle_languages,
+            subtitle_track=subtitle_track,
         )
         _, subtitle_candidates, _, _ = self.capture_result
-        _, hls_subtitles = parse_hls_playlist(self.stream_url, self.playlist_text)
+        hls_tracks = parse_hls_subtitle_tracks(self.stream_url, self.playlist_text)
         debug_messages = [
-            f"[subtitle-debug] selected source: {selection['kind']}",
-            f"[subtitle-debug] HLS English tracks detected: {len(hls_subtitles)}",
+            f"[subtitle-debug] selected source: {selection['kind']} ({language_name(selection['language'])})",
+            f"[subtitle-debug] HLS subtitle tracks detected: {len(hls_tracks)}",
             f"[subtitle-debug] external subtitle candidates detected: {len(subtitle_candidates)}",
             f"[subtitle-debug] subtitles enabled: {'yes' if subtitles_enabled else 'no'}",
         ]

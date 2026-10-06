@@ -154,6 +154,8 @@ def make_mpv_command(
     subtitles_enabled=True,
     extra_args=(),
     debug=False,
+    subtitle_languages=("en",),
+    subtitle_track=None,
 ):
     mpv_executable, mpv_arguments = make_mpv_arguments(
         stream_url,
@@ -167,6 +169,8 @@ def make_mpv_command(
         subtitles_enabled,
         extra_args,
         debug,
+        subtitle_languages,
+        subtitle_track,
     )
     executable_command = (
         "mpv"
@@ -191,6 +195,8 @@ def make_mpv_arguments(
     subtitles_enabled=True,
     extra_args=(),
     debug=False,
+    subtitle_languages=("en",),
+    subtitle_track=None,
 ):
     referer = headers.get("referer", page_url)
     user_agent = headers.get("user-agent", "")
@@ -205,8 +211,10 @@ def make_mpv_arguments(
     args.append(f"--cache-pause-wait={initial_buffer}")
     if debug:
         args.append("--msg-level=all=debug")
-    if subtitles_enabled:
-        args.extend(("--sid=auto", "--slang=en"))
+    if subtitles_enabled and subtitle_track:
+        args.append(f"--sid={subtitle_track}")
+    elif subtitles_enabled:
+        args.extend(("--sid=auto", "--slang=" + ",".join(subtitle_languages or ("en",))))
     else:
         args.append("--sid=no")
     if referer:

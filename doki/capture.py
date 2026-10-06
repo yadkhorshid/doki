@@ -1,7 +1,6 @@
 """Opens an episode page in Chromium and records its streams and subtitles."""
 
 import os
-import re
 import sys
 import time
 
@@ -15,7 +14,7 @@ if getattr(sys, "frozen", False):
 
 from playwright.sync_api import sync_playwright
 from .adblock import block_ads
-from .subtitles import is_direct_subtitle_url, is_english_subtitle, is_subtitle_resource
+from .subtitles import detect_subtitle_language, is_direct_subtitle_url, is_subtitle_resource
 
 
 def inspect_player_frame(frame):
@@ -103,7 +102,7 @@ def capture_once(p, page_url, status_callback, page_info, headless, timeout):
                 )
                 subtitle_candidates.append((
                     response.url,
-                    is_english_subtitle(response.url, response.headers),
+                    detect_subtitle_language(response.url, response.headers),
                 ))
 
         page.on("response", handle_response)
@@ -139,12 +138,11 @@ def capture_once(p, page_url, status_callback, page_info, headless, timeout):
             if width and height and not player_video_size:
                 player_video_size = (width, height)
             for subtitle in player_info.get("subtitles", []):
-                language = subtitle.get("language", "").lower()
-                label = subtitle.get("label", "")
-                is_english = language == "en" or language == "eng" or language.startswith("en-")
-                is_english = is_english or re.search(r"\benglish\b", label, re.IGNORECASE) is not None
-                if is_english and is_direct_subtitle_url(subtitle.get("url", "")):
-                    subtitle_candidates.append((subtitle["url"], True))
+                subtitle_url = subtitle.get("url", "")
+                if is_direct_subtitle_url(subtitle_url):
+                    subtitle_candidates.append((subtitle_url, detect_subtitle_language(
+                        subtitle_url, label=subtitle.get("label", ""), srclang=subtitle.get("language", ""),
+                    )))
         if page_info is not None:
             try:
                 page_info["title"] = page.title().strip()

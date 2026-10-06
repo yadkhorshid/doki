@@ -30,9 +30,9 @@ def console_main():
     )
     qualities, hls_subtitles = parse_hls_playlist(stream_url, playlist_text)
     candidate_languages = {}
-    for subtitle_url, is_english in subtitle_candidates:
+    for subtitle_url, language in subtitle_candidates:
         if subtitle_url not in hls_subtitles:
-            candidate_languages[subtitle_url] = candidate_languages.get(subtitle_url, False) or is_english
+            candidate_languages[subtitle_url] = candidate_languages.get(subtitle_url, False) or language == "en"
 
     english_subtitles = [url for url, is_english in candidate_languages.items() if is_english]
     unknown_subtitles = [url for url, is_english in candidate_languages.items() if not is_english]

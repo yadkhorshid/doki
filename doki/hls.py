@@ -3,6 +3,8 @@
 import re
 from urllib.parse import urljoin
 
+from .subtitles import detect_subtitle_language
+
 
 def parse_hls_playlist(playlist_url, playlist_text):
     qualities = set()
@@ -30,6 +32,32 @@ def parse_hls_playlist(playlist_url, playlist_text):
                 english_subtitles.append(urljoin(playlist_url, attributes["URI"]))
 
     return sorted(qualities), english_subtitles
+
+
+def parse_hls_subtitle_tracks(playlist_url, playlist_text):
+    """Every subtitle rendition in a master playlist, with its detected language."""
+    tracks = []
+    for line in playlist_text.splitlines():
+        if not line.startswith("#EXT-X-MEDIA:"):
+            continue
+        attributes = {
+            key: quoted or unquoted
+            for key, quoted, unquoted in re.findall(
+                r'([A-Z0-9-]+)=(?:"([^"]*)"|([^,]*))', line.partition(":")[2]
+            )
+        }
+        if attributes.get("TYPE") != "SUBTITLES" or not attributes.get("URI"):
+            continue
+        url = urljoin(playlist_url, attributes["URI"])
+        name = attributes.get("NAME", "")
+        tag = attributes.get("LANGUAGE", "")
+        tracks.append({
+            "url": url,
+            "tag": tag,
+            "name": name,
+            "language": detect_subtitle_language(url, label=name, srclang=tag),
+        })
+    return tracks
 
 
 def parse_hls_variants(playlist_url, playlist_text):
