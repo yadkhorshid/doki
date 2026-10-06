@@ -14,8 +14,6 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -50,8 +48,6 @@ jobs:
           - runner: macos-15-intel
             label: intel
     runs-on: ${{ matrix.runner }}
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -86,6 +82,13 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Check the version matches the tag
+        run: |
+          version=$(python3 -c "import re; print(re.search(r'\"(.+)\"', open('doki/__init__.py').read()).group(1))")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "doki/__init__.py says $version but the tag is $GITHUB_REF_NAME; bump __version__ first." >&2
+            exit 1
+          fi
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

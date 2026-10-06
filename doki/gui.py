@@ -6,6 +6,7 @@ import os
 import queue
 import sys
 import threading
+import webbrowser
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import messagebox, ttk
@@ -26,6 +27,7 @@ from .library import (
 )
 from .mpv import find_mpv_executable, launch_in_new_powershell, launch_mpv, make_mpv_arguments, make_mpv_command
 from .paths import IS_MAC, data_path, load_json, resource_path, save_json
+from .updates import check_for_update
 from .subtitles import (
     language_name,
     make_subtitle_options,
@@ -284,6 +286,11 @@ class M3u8App:
             text="Settle in, pick your stream, and let mpv take it from here.",
             style="Subtitle.TLabel",
         ).grid(row=2, column=0, sticky="w")
+        self.update_label = tk.Label(
+            heading, text="", bg=background, fg=green, font=(font_family, 9, "bold", "underline"), cursor="hand2",
+        )
+        self.update_label.grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.update_label.grid_remove()
         self.mascot_canvas = tk.Canvas(
             heading,
             width=116,
@@ -419,6 +426,15 @@ class M3u8App:
         self.url_entry.focus_set()
         self._prefill_from_clipboard()
         threading.Thread(target=remove_stale_subtitles, daemon=True).start()
+        threading.Thread(target=lambda: self.events.put(("update", check_for_update())), daemon=True).start()
+
+    def _show_update(self, update):
+        if not update:
+            return
+        version, url = update
+        self.update_label.configure(text=f"doki {version} is out - click to download")
+        self.update_label.bind("<Button-1>", lambda _event: webbrowser.open(url))
+        self.update_label.grid()
 
     def _save_debug_setting(self):
         self.settings["debug_console"] = self.debug_var.get()
@@ -693,6 +709,8 @@ class M3u8App:
                 break
             if event == "status":
                 self.status_var.set(payload)
+            elif event == "update":
+                self._show_update(payload)
             elif event == "error":
                 self.progress.stop()
                 self.analyze_button.state(["!disabled"])
