@@ -63,15 +63,39 @@ def resume_file_path(page_url):
     return data_path("positions", key + ".txt")
 
 
-def read_resume_position(page_url):
+def watch_progress(page_url):
+    """(position, duration) in seconds from when mpv last closed on this page, or None."""
     try:
         with open(resume_file_path(page_url), encoding="utf-8") as file:
             position, duration = (float(value) for value in file.read().split()[:2])
     except (OSError, ValueError):
         return None
-    if position < 30 or (duration and position > duration - 90):
+    return position, duration
+
+
+def is_finished(position, duration):
+    return bool(duration) and position > duration - 90
+
+
+def read_resume_position(page_url):
+    progress = watch_progress(page_url)
+    if not progress:
+        return None
+    position, duration = progress
+    if position < 30 or is_finished(position, duration):
         return None
     return position
+
+
+def remove_history_entry(page_url):
+    """Forgets a page and its resume position; returns the remaining history."""
+    history = [entry for entry in load_json("history.json", []) if entry.get("url") != page_url]
+    save_json("history.json", history)
+    try:
+        os.remove(resume_file_path(page_url))
+    except OSError:
+        pass
+    return history
 
 
 def make_resume_arguments(page_url, title, start_position=None):

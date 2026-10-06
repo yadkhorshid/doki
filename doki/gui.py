@@ -14,7 +14,16 @@ from urllib.parse import urlsplit
 from . import anime4k
 from .capture import capture_page
 from .hls import make_quality_options, parse_hls_subtitle_tracks, parse_hls_variants
-from .library import add_history_entry, format_timestamp, make_resume_arguments, next_episode_url, read_resume_position
+from .library import (
+    add_history_entry,
+    format_timestamp,
+    is_finished,
+    make_resume_arguments,
+    next_episode_url,
+    read_resume_position,
+    remove_history_entry,
+    watch_progress,
+)
 from .mpv import find_mpv_executable, launch_in_new_powershell, launch_mpv, make_mpv_arguments, make_mpv_command
 from .paths import IS_MAC, data_path, load_json, resource_path, save_json
 from .subtitles import (
@@ -160,6 +169,7 @@ class M3u8App:
             font=(font_family, 11, "bold"),
             padding=(4, 0),
         )
+        style.configure("Card.TFrame", background=card)
         style.configure("TLabel", background=card, foreground=ink, font=(font_family, 10))
         style.configure("Eyebrow.TLabel", background=background, foreground=green, font=(font_family, 9, "bold"))
         style.configure("Title.TLabel", background=background, foreground=ink, font=(font_family, 25, "bold"))
@@ -329,9 +339,19 @@ class M3u8App:
         self.analyze_button = ttk.Button(episode, text="Find stream", command=self.analyze)
         self.analyze_button.grid(row=1, column=1, sticky="ew")
         self.url_entry.bind("<Return>", lambda _event: self.analyze())
-        self.recent_combo = ttk.Combobox(episode, textvariable=self.recent_var, state="readonly")
-        self.recent_combo.grid(row=2, column=0, sticky="ew", padx=(0, 10), pady=(10, 0))
+        recents = ttk.Frame(episode, style="Card.TFrame")
+        recents.grid(row=2, column=0, sticky="ew", padx=(0, 10), pady=(10, 0))
+        recents.columnconfigure(0, weight=1)
+        self.recent_combo = ttk.Combobox(
+            recents,
+            textvariable=self.recent_var,
+            state="readonly",
+            postcommand=lambda: self._refresh_recents(keep_selection=True),
+        )
+        self.recent_combo.grid(row=0, column=0, sticky="ew")
         self.recent_combo.bind("<<ComboboxSelected>>", self._select_recent)
+        self.remove_recent_button = ttk.Button(recents, text="✕", width=3, command=self.remove_recent)
+        self.remove_recent_button.grid(row=0, column=1, padx=(6, 0))
         self.next_button = ttk.Button(episode, text="Next episode", command=self.next_episode)
         self.next_button.grid(row=2, column=1, sticky="ew", pady=(10, 0))
         self._refresh_recents()
@@ -438,17 +458,38 @@ class M3u8App:
             self.url_var.set(text)
             self.status_var.set("Link pasted from your clipboard. Press Find stream when ready.")
 
-    def _refresh_recents(self):
+    def _refresh_recents(self, keep_selection=False):
+        selected_url = self.recent_options.get(self.recent_var.get()) if keep_selection else None
         self.recent_options = {}
         for entry in self.history:
             title = entry.get("title") or urlsplit(entry["url"]).path.strip("/") or entry["url"]
-            label = f"{entry.get('watched', '')}  {title}".strip()
+            progress = watch_progress(entry["url"])
+            if progress and is_finished(*progress):
+                detail = "✓ watched"
+            elif progress and progress[1]:
+                detail = f"{format_timestamp(progress[0])} / {format_timestamp(progress[1])}"
+            elif progress:
+                detail = f"stopped at {format_timestamp(progress[0])}"
+            else:
+                detail = entry.get("watched", "")
+            label = f"{title}  ·  {detail}" if detail else title
             if label in self.recent_options:
                 label += f" ({len(self.recent_options)})"
             self.recent_options[label] = entry["url"]
         labels = list(self.recent_options)
         self.recent_combo.configure(values=labels)
-        self.recent_var.set("Recently watched" if labels else "No history yet")
+        selected_label = next((label for label, url in self.recent_options.items() if url == selected_url), None)
+        self.recent_var.set(selected_label or ("Recently watched" if labels else "No history yet"))
+
+    def remove_recent(self):
+        label = self.recent_var.get()
+        page_url = self.recent_options.get(label)
+        if not page_url:
+            self.status_var.set("Pick an episode from Recently watched to remove it.")
+            return
+        self.history = remove_history_entry(page_url)
+        self._refresh_recents()
+        self.status_var.set(f"Removed from history: {label.split('  ·  ')[0]}")
 
     def _select_recent(self, _event=None):
         page_url = self.recent_options.get(self.recent_var.get())
