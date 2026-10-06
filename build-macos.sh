@@ -6,24 +6,20 @@ set -euo pipefail
 cd "$(dirname "$0")"
 PYTHON="${PYTHON:-python3}"
 ANIME4K_URL="https://github.com/bloc97/Anime4K/releases/download/v4.0.1/Anime4K_v4.0.zip"
+# Pinned so every release ships the mpv it was tested with; bump both this and build.ps1 together.
+MPV_VERSION="v0.41.0"
 DOWNLOADS="build/downloads"
 SHADERS="mpv/portable_config/shaders"
 
 case "$(uname -m)" in
-    arm64) LABEL="arm64"; MPV_ASSET='macos-14-arm\.zip$' ;;
-    x86_64) LABEL="intel"; MPV_ASSET='macos-15-intel\.zip$' ;;
+    arm64) LABEL="arm64"; MPV_BUILD="macos-14-arm" ;;
+    x86_64) LABEL="intel"; MPV_BUILD="macos-15-intel" ;;
     *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 APP="dist/doki.app"
 ARCHIVE="dist/doki-macOS-$LABEL.zip"
 
-github_api() {
-    if [ -n "${GITHUB_TOKEN:-}" ]; then
-        curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" "$1"
-    else
-        curl -fsSL "$1"
-    fi
-}
+MPV_URL="https://github.com/mpv-player/mpv/releases/download/$MPV_VERSION/mpv-$MPV_VERSION-$MPV_BUILD.zip"
 
 "$PYTHON" -m pip install -r requirements-build.txt
 "$PYTHON" -m playwright install chromium
@@ -33,23 +29,20 @@ if [ "${1:-}" = "--refresh-mpv" ]; then
 fi
 mkdir -p "$DOWNLOADS" "$SHADERS"
 
-if [ ! -x mpv/mpv.app/Contents/MacOS/mpv ]; then
-    MPV_URL="$(github_api https://api.github.com/repos/mpv-player/mpv/releases/latest | "$PYTHON" -c '
-import json, re, sys
-assets = json.load(sys.stdin)["assets"]
-print(next(asset["browser_download_url"] for asset in assets if re.search(sys.argv[1], asset["name"])))
-' "$MPV_ASSET")"
-    echo "Downloading $(basename "$MPV_URL")"
+if [ "$(cat mpv/MPV-VERSION.txt 2>/dev/null)" != "$MPV_VERSION" ]; then
+    rm -rf mpv/mpv.app
+    echo "Downloading mpv $MPV_VERSION ($MPV_BUILD)"
     curl -fsSL -o "$DOWNLOADS/mpv-macos.zip" "$MPV_URL"
     rm -rf "$DOWNLOADS/mpv-macos"
     unzip -q -o "$DOWNLOADS/mpv-macos.zip" -d "$DOWNLOADS/mpv-macos"
     tar -xzf "$DOWNLOADS/mpv-macos/mpv.tar.gz" -C mpv
     cat > mpv/LICENSE-NOTICE.txt <<EOF
-This folder contains mpv ($(basename "$MPV_URL")) from https://github.com/mpv-player/mpv/releases
+This folder contains mpv $MPV_VERSION ($MPV_BUILD) from https://github.com/mpv-player/mpv/releases
 and the Anime4K v4.0 shaders (MIT License, https://github.com/bloc97/Anime4K).
 mpv is free software licensed under the GPLv2 or later; see https://github.com/mpv-player/mpv
 for its license and source code.
 EOF
+    echo "$MPV_VERSION" > mpv/MPV-VERSION.txt
 fi
 
 if [ ! -f "$SHADERS/Anime4K_Clamp_Highlights.glsl" ]; then
