@@ -4,7 +4,19 @@ doki was created to make watching anime with [Anime4K](https://github.com/bloc97
 
 ## Download and run
 
-Download `doki-Windows-x64.zip` from the latest GitHub release, extract the whole folder, and double-click **doki.exe**. Everything is bundled: Chromium, mpv, the Anime4K shaders and JetBrains Mono Nerd Font. You don't need to install anything or edit an `mpv.conf`.
+Download the ZIP for your computer from the latest GitHub release. Everything is bundled: Chromium, mpv, the Anime4K shaders and JetBrains Mono Nerd Font. You don't need to install anything or edit an `mpv.conf`.
+
+- **Windows:** `doki-Windows-x64.zip`. Extract the whole folder and double-click **doki.exe**.
+- **Mac with Apple Silicon (M1 or newer):** `doki-macOS-arm64.zip`. Needs macOS 14 Sonoma or newer.
+- **Mac with an Intel chip:** `doki-macOS-intel.zip`. Needs macOS 15 Sequoia or newer.
+
+On a Mac, unzip it and move **doki.app** to Applications. doki isn't signed with an Apple developer certificate, so macOS blocks it the first time. To open it anyway, run this once in Terminal:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/doki.app
+```
+
+You can also right-click doki.app, choose **Open**, then **Open** again. If macOS still refuses, go to **System Settings → Privacy & Security** and choose **Open Anyway**.
 
 Paste an episode or player URL and choose **Find stream**. doki looks for the M3U8 and English subs (if available) in a hidden browser with ads and popups blocked. If it can't find them, it opens the browser so you can press Play.
 
@@ -13,10 +25,10 @@ Paste an episode or player URL and choose **Find stream**. doki looks for the M3
   - In the player, `Ctrl+1`-`Ctrl+6` switch modes and `Ctrl+0` turns the shaders off. Choose *Use my mpv config* to leave shaders to your own mpv setup.
 - **Recently watched** and **Next episode** sit under the link box.
 - **Resume:** doki remembers where you stopped and offers to continue next time.
-- mpv opens on its own, without a console. Tick **Show debug console when playing** to see mpv's debug log when something goes wrong.
-- Settings, history and resume positions are stored in `%APPDATA%\doki`.
+- mpv opens on its own, without a console. If something goes wrong, tick **Show debug console when playing** to see mpv's debug log. On a Mac the option is **Save an mpv debug log when playing**, and doki shows where the log was saved.
+- Settings, history and resume positions are stored in `%APPDATA%\doki` on Windows and `~/Library/Application Support/doki` on a Mac.
 
-doki uses its bundled mpv and falls back to an mpv on `PATH` (or registered with Windows) if the bundled one is missing.
+doki uses its bundled mpv. If that's missing, it falls back to an mpv on `PATH` or registered with Windows, or on a Mac to one installed with Homebrew or in Applications.
 
 ## Build on Windows
 
@@ -34,6 +46,20 @@ mpv and the shaders are downloaded once into `mpv\` (git-ignored) and reused; pa
 python -m doki          # GUI
 python -m doki --cli    # console mode
 ```
+
+## Build on macOS
+
+With Python 3.13 (from python.org, which includes Tk) run:
+
+```sh
+./build-macos.sh
+```
+
+It builds for the Mac's own chip, bundles the official mpv macOS build and the Anime4K shaders, and creates `dist/doki.app` and `dist/doki-macOS-arm64.zip` (or `-intel.zip`). Pass `--refresh-mpv` to download mpv again.
+
+## Releases
+
+Pushing a `v*` tag runs [.github/workflows/release.yml](.github/workflows/release.yml). It builds Windows and both Mac versions on GitHub's runners, runs `tests/smoke_test.py` and checks that each packaged app starts. It then publishes the release with the notes from `release-notes/<tag>.md`. Pushing to a `ci/*` branch runs the same builds and tests without publishing.
 
 The code lives in the `doki` package: `capture` (Chromium stream capture), `adblock`, `hls`, `subtitles`, `mpv` (finding/launching mpv), `anime4k` (shader presets), `library` (history, next episode, resume), `gui` and `cli`.
 
