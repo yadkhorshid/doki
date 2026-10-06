@@ -96,6 +96,13 @@ try {
     Copy-Item -LiteralPath $HeadlessShellDirectory -Destination $BundledBrowserDirectory -Recurse -Force
 
     Copy-Item -LiteralPath $MpvDirectory -Destination $AppDirectory -Recurse -Force
+    # Shader caches and watch-later files from local test runs don't belong in the release.
+    foreach ($LocalState in "cache", "watch_later") {
+        $LocalStatePath = Join-Path $AppDirectory "mpv\portable_config\$LocalState"
+        if (Test-Path -LiteralPath $LocalStatePath) {
+            Remove-Item -LiteralPath $LocalStatePath -Recurse -Force
+        }
+    }
 
     if (Test-Path -LiteralPath $Archive) {
         Remove-Item -LiteralPath $Archive -Force
