@@ -11,6 +11,7 @@ import tkinter.font as tkfont
 from tkinter import messagebox, ttk
 from urllib.parse import urlsplit
 
+from . import anime4k
 from .capture import capture_page
 from .hls import make_quality_options, parse_hls_playlist, parse_hls_variants
 from .library import add_history_entry, format_timestamp, make_resume_arguments, next_episode_url, read_resume_position
@@ -36,8 +37,8 @@ class M3u8App:
         self.recent_options = {}
 
         root.title("doki")
-        root.geometry("840x790")
-        root.minsize(720, 730)
+        root.geometry("840x870")
+        root.minsize(720, 810)
         root.overrideredirect(True)
         root.configure(bg="#d8cdbd")
 
@@ -150,6 +151,11 @@ class M3u8App:
         self.cache_var = tk.StringVar(value=str(self.settings.get("cache_secs", 1300)))
         self.buffer_var = tk.StringVar(value=str(self.settings.get("initial_buffer", 8)))
         self.recent_var = tk.StringVar()
+        self.anime4k_options = anime4k.preset_options()
+        saved_preset = self.settings.get("anime4k")
+        self.anime4k_var = tk.StringVar(
+            value=saved_preset if saved_preset in self.anime4k_options else anime4k.default_preset(self.anime4k_options)
+        )
 
         shell = tk.Frame(root, bg="#d8cdbd", padx=1, pady=1)
         shell.pack(fill="both", expand=True)
@@ -311,6 +317,12 @@ class M3u8App:
         self.cache_spin.grid(row=3, column=0, sticky="w", padx=(0, 14))
         self.buffer_spin = ttk.Spinbox(playback, from_=0, to=45, increment=1, textvariable=self.buffer_var, width=10)
         self.buffer_spin.grid(row=3, column=1, sticky="w")
+
+        ttk.Label(playback, text="Anime4K upscaling").grid(row=4, column=0, columnspan=2, sticky="w", pady=(20, 6))
+        self.anime4k_combo = ttk.Combobox(
+            playback, textvariable=self.anime4k_var, values=list(self.anime4k_options), state="readonly"
+        )
+        self.anime4k_combo.grid(row=5, column=0, columnspan=2, sticky="ew")
 
         footer = ttk.Frame(body, style="App.TFrame")
         footer.grid(row=5, column=0, sticky="ew", pady=(22, 0))
@@ -640,6 +652,7 @@ class M3u8App:
         ):
             start_position = None
         extra_args = make_resume_arguments(page_url, self.page_title, start_position)
+        extra_args += anime4k.shader_arguments(self.anime4k_options[self.anime4k_var.get()])
 
         selection = self.subtitle_options[self.subtitle_var.get()]
         self.settings.update({
@@ -647,6 +660,7 @@ class M3u8App:
             "initial_buffer": initial_buffer,
             "quality": self.quality_var.get(),
             "subtitles": "none" if selection["kind"] == "none" else "auto",
+            "anime4k": self.anime4k_var.get(),
         })
         save_json("settings.json", self.settings)
         subtitle_urls = ()

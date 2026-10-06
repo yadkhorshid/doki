@@ -10,6 +10,15 @@ def resource_path(*parts):
     return os.path.join(root, *parts)
 
 
+def app_path(*parts):
+    """Files shipped next to doki.exe (or the repo root when running from source)."""
+    if getattr(sys, "frozen", False):
+        root = os.path.dirname(sys.executable)
+    else:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root, *parts)
+
+
 def data_path(*parts):
     base = os.environ.get("APPDATA") or os.path.expanduser("~")
     directory = os.path.join(base, "doki")

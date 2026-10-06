@@ -5,13 +5,23 @@ import shutil
 import subprocess
 from urllib.parse import urlsplit
 
+from .paths import app_path
+
 
 def powershell_quote(value):
     escaped = value.replace("`", "``").replace('"', '`"').replace("$", "`$")
     return '"' + escaped + '"'
 
 
+def bundled_mpv_executable():
+    executable = app_path("mpv", "mpv.exe")
+    return executable if os.path.isfile(executable) else None
+
+
 def find_mpv_executable():
+    bundled = bundled_mpv_executable()
+    if bundled:
+        return bundled
     for name in ("mpv.exe", "mpv"):
         executable = shutil.which(name)
         if executable:
