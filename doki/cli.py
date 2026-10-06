@@ -96,6 +96,7 @@ def console_main():
         page_url,
         standalone_subtitles,
         mpv_executable,
+        debug=True,
     )
     command = make_mpv_command(
         stream_url,
@@ -103,6 +104,7 @@ def console_main():
         page_url,
         standalone_subtitles,
         mpv_executable,
+        debug=True,
     )
     print("\nmpv command:")
     print(command)

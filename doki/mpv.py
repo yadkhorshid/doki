@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import threading
 from urllib.parse import urlsplit
 
 from .paths import app_path
@@ -43,6 +44,28 @@ def find_mpv_executable():
         if os.path.isfile(executable):
             return executable
     return None
+
+
+def launch_mpv(mpv_executable, mpv_arguments, cleanup_paths=()):
+    """Starts mpv without a console and removes temporary files once it exits."""
+    process = subprocess.Popen(
+        [mpv_executable, *mpv_arguments],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    if cleanup_paths:
+        def cleanup():
+            process.wait()
+            for path in cleanup_paths:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+        threading.Thread(target=cleanup, daemon=True).start()
+    return process
 
 
 def launch_in_new_powershell(
@@ -110,6 +133,7 @@ def make_mpv_command(
     initial_buffer=8,
     subtitles_enabled=True,
     extra_args=(),
+    debug=False,
 ):
     mpv_executable, mpv_arguments = make_mpv_arguments(
         stream_url,
@@ -122,6 +146,7 @@ def make_mpv_command(
         initial_buffer,
         subtitles_enabled,
         extra_args,
+        debug,
     )
     executable_command = (
         "mpv"
@@ -145,6 +170,7 @@ def make_mpv_arguments(
     initial_buffer=8,
     subtitles_enabled=True,
     extra_args=(),
+    debug=False,
 ):
     referer = headers.get("referer", page_url)
     user_agent = headers.get("user-agent", "")
@@ -157,7 +183,8 @@ def make_mpv_arguments(
     args.append(f"--cache-secs={cache_secs}")
     args.append("--cache-pause-initial=yes")
     args.append(f"--cache-pause-wait={initial_buffer}")
-    args.append("--msg-level=all=debug")
+    if debug:
+        args.append("--msg-level=all=debug")
     if subtitles_enabled:
         args.extend(("--sid=auto", "--slang=en"))
     else:

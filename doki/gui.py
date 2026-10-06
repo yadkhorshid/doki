@@ -15,9 +15,9 @@ from . import anime4k
 from .capture import capture_page
 from .hls import make_quality_options, parse_hls_playlist, parse_hls_variants
 from .library import add_history_entry, format_timestamp, make_resume_arguments, next_episode_url, read_resume_position
-from .mpv import find_mpv_executable, launch_in_new_powershell, make_mpv_arguments, make_mpv_command
+from .mpv import find_mpv_executable, launch_in_new_powershell, launch_mpv, make_mpv_arguments, make_mpv_command
 from .paths import load_json, resource_path, save_json
-from .subtitles import make_subtitle_options, save_captured_subtitle
+from .subtitles import make_subtitle_options, remove_stale_subtitles, save_captured_subtitle
 
 
 class M3u8App:
@@ -37,8 +37,8 @@ class M3u8App:
         self.recent_options = {}
 
         root.title("doki")
-        root.geometry("840x870")
-        root.minsize(720, 810)
+        root.geometry("840x830")
+        root.minsize(720, 816)
         root.overrideredirect(True)
         root.configure(bg="#d8cdbd")
 
@@ -125,6 +125,8 @@ class M3u8App:
         style.configure("Title.TLabel", background=background, foreground=ink, font=(font_family, 25, "bold"))
         style.configure("Subtitle.TLabel", background=background, foreground=muted, font=(font_family, 10))
         style.configure("Muted.TLabel", background=background, foreground=muted, font=(font_family, 9))
+        style.configure("Muted.TCheckbutton", background=background, foreground=muted, font=(font_family, 9))
+        style.map("Muted.TCheckbutton", background=[("active", background)], indicatorcolor=[("selected", green), ("!selected", card)])
         style.configure("TButton", font=(font_family, 10, "bold"), padding=(14, 9), background="#e9e4d9", foreground=ink, borderwidth=0)
         style.map(
             "TButton",
@@ -151,6 +153,7 @@ class M3u8App:
         self.cache_var = tk.StringVar(value=str(self.settings.get("cache_secs", 1300)))
         self.buffer_var = tk.StringVar(value=str(self.settings.get("initial_buffer", 8)))
         self.recent_var = tk.StringVar()
+        self.debug_var = tk.BooleanVar(value=bool(self.settings.get("debug_console", False)))
         self.anime4k_options = anime4k.preset_options()
         saved_preset = self.settings.get("anime4k")
         self.anime4k_var = tk.StringVar(
@@ -211,7 +214,7 @@ class M3u8App:
         titlebar.bind("<ButtonPress-1>", self._start_window_drag)
         titlebar.bind("<B1-Motion>", self._drag_window)
 
-        body = ttk.Frame(surface, padding=(38, 30, 38, 28), style="App.TFrame")
+        body = ttk.Frame(surface, padding=(38, 22, 38, 22), style="App.TFrame")
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=1)
 
@@ -325,11 +328,15 @@ class M3u8App:
         self.anime4k_combo.grid(row=5, column=0, columnspan=2, sticky="ew")
 
         footer = ttk.Frame(body, style="App.TFrame")
-        footer.grid(row=5, column=0, sticky="ew", pady=(22, 0))
+        footer.grid(row=5, column=0, sticky="ew", pady=(18, 0))
         footer.columnconfigure(0, weight=1)
-        ttk.Label(footer, text="Your video will open in a separate player window.", style="Muted.TLabel").grid(
-            row=0, column=0, sticky="w"
-        )
+        ttk.Checkbutton(
+            footer,
+            text="Show debug console when playing",
+            variable=self.debug_var,
+            style="Muted.TCheckbutton",
+            command=self._save_debug_setting,
+        ).grid(row=0, column=0, sticky="w")
         self.start_button = ttk.Button(footer, text="  Start watching  ", style="Primary.TButton", command=self.start_mpv)
         self.start_button.grid(row=0, column=1, sticky="e")
         self.start_button.state(["disabled"])
@@ -339,6 +346,11 @@ class M3u8App:
         root.after(100, self._register_custom_taskbar_button)
         self.url_entry.focus_set()
         self._prefill_from_clipboard()
+        threading.Thread(target=remove_stale_subtitles, daemon=True).start()
+
+    def _save_debug_setting(self):
+        self.settings["debug_console"] = self.debug_var.get()
+        save_json("settings.json", self.settings)
 
     def _prefill_from_clipboard(self):
         try:
@@ -653,6 +665,7 @@ class M3u8App:
             start_position = None
         extra_args = make_resume_arguments(page_url, self.page_title, start_position)
         extra_args += anime4k.shader_arguments(self.anime4k_options[self.anime4k_var.get()])
+        debug = self.debug_var.get()
 
         selection = self.subtitle_options[self.subtitle_var.get()]
         self.settings.update({
@@ -685,6 +698,7 @@ class M3u8App:
             initial_buffer=initial_buffer,
             subtitles_enabled=subtitles_enabled,
             extra_args=extra_args,
+            debug=debug,
         )
         launch_executable, launch_arguments = make_mpv_arguments(
             self.stream_url,
@@ -697,6 +711,7 @@ class M3u8App:
             initial_buffer=initial_buffer,
             subtitles_enabled=subtitles_enabled,
             extra_args=extra_args,
+            debug=debug,
         )
         _, subtitle_candidates, _, _ = self.capture_result
         _, hls_subtitles = parse_hls_playlist(self.stream_url, self.playlist_text)
@@ -712,7 +727,9 @@ class M3u8App:
                 + ("a captured local file" if cleanup_paths else "its original URL")
             )
         try:
-            if not launch_in_new_powershell(
+            if not debug:
+                launch_mpv(launch_executable, launch_arguments, cleanup_paths)
+            elif not launch_in_new_powershell(
                 command,
                 cleanup_paths,
                 debug_messages,
@@ -725,7 +742,9 @@ class M3u8App:
             return
         self.history = add_history_entry(page_url, self.page_title)
         self._refresh_recents()
-        self.status_var.set("Started mpv in a new PowerShell window.")
+        self.status_var.set(
+            "Started mpv" + (" with a debug console." if debug else ". Enjoy!")
+        )
 
 
 def main():

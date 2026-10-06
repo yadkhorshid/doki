@@ -1,7 +1,9 @@
 """Subtitle detection, conversion and selection."""
 
+import os
 import re
 import tempfile
+import time
 from urllib.parse import urlsplit
 
 
@@ -82,6 +84,28 @@ def webvtt_to_srt(body):
     return ("\n\n".join(cues) + "\n").encode("utf-8") if cues else None
 
 
+TEMP_SUBTITLE_PREFIX = "open-in-mpv-"
+
+
+def remove_stale_subtitles(max_age_hours=12):
+    """Deletes temporary subtitles left behind if doki closed before mpv did."""
+    cutoff = time.time() - max_age_hours * 3600
+    directory = tempfile.gettempdir()
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith(TEMP_SUBTITLE_PREFIX):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+        except OSError:
+            pass
+
+
 def save_captured_subtitle(url, response):
     if not response:
         return None
@@ -98,7 +122,7 @@ def save_captured_subtitle(url, response):
         if not body:
             return None
         suffix = ".srt"
-    with tempfile.NamedTemporaryFile(prefix="open-in-mpv-", suffix=suffix, delete=False) as subtitle_file:
+    with tempfile.NamedTemporaryFile(prefix=TEMP_SUBTITLE_PREFIX, suffix=suffix, delete=False) as subtitle_file:
         subtitle_file.write(body)
         return subtitle_file.name
 
