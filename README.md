@@ -18,11 +18,12 @@ xattr -dr com.apple.quarantine /Applications/doki.app
 
 You can also right-click doki.app, choose **Open**, then **Open** again. If macOS still refuses, go to **System Settings → Privacy & Security** and choose **Open Anyway**.
 
-Paste an episode or player URL and choose **Find stream**. doki looks for the M3U8 and English subs (if available) in a hidden browser with ads and popups blocked. If it can't find them, it opens the browser so you can press Play.
+Paste an episode or player URL and choose **Find stream**. doki looks for the M3U8 and any subtitles in a hidden browser with ads and popups blocked. If it can't find them, it opens the browser so you can press Play.
 
 - **Anime4K upscaling:** *Auto* picks the mode from the stream's resolution (Mode A+A for 1080p, B for 720p, C for 480p and below). You can also pick a preset yourself.
   - A+A is the highest-quality mode for 1080p, but it's also the heaviest. On a weaker GPU (e.g. laptop integrated graphics) it can stutter or drop frames. If it does, pick *Mode A (HQ)* or one of the *Fast* presets, or press `Ctrl+1` in the player to switch to Mode A.
   - In the player, `Ctrl+1`-`Ctrl+6` switch modes and `Ctrl+0` turns the shaders off. Choose *Use my mpv config* to leave shaders to your own mpv setup.
+- **Subtitles in any language:** the Subtitles list shows every track doki finds, by language (e.g. *Spanish (from playlist)*). doki remembers the language you pick and selects it again next time. It falls back to English, or to no subtitles if neither is available.
 - **Recently watched** and **Next episode** sit under the link box.
 - **Resume:** doki remembers where you stopped and offers to continue next time.
 - mpv opens on its own, without a console. If something goes wrong, tick **Show debug console when playing** to see mpv's debug log. On a Mac the option is **Save an mpv debug log when playing**, and doki shows where the log was saved.
