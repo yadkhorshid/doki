@@ -31,9 +31,9 @@ def preset_label(mode, quality):
 
 
 def mode_for_height(height):
-    """Anime4K's guidance: Mode A for 1080p, B for 720p, C for 480p and below."""
+    """Mode A+A for 1080p, then Anime4K's guidance: B for 720p, C for 480p and below."""
     if not height or height >= 900:
-        return "A"
+        return "A+A"
     if height >= 600:
         return "B"
     return "C"

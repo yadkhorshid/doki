@@ -8,7 +8,7 @@ Download `doki-Windows-x64.zip` from the latest GitHub release, extract the whol
 
 Paste an episode or player URL and choose **Find stream**. doki looks for the M3U8 and English subs (if available) in a hidden browser with ads and popups blocked. If it can't find them, it opens the browser so you can press Play.
 
-- **Anime4K upscaling:** *Auto* picks the mode from the stream's resolution (Mode A for 1080p, B for 720p, C for 480p and below). You can also pick a preset yourself; use *Fast* on weaker GPUs. In the player, `Ctrl+1`-`Ctrl+6` switch modes and `Ctrl+0` turns the shaders off. Choose *Use my mpv config* to leave shaders to your own mpv setup.
+- **Anime4K upscaling:** *Auto* picks the mode from the stream's resolution (Mode A+A for 1080p, B for 720p, C for 480p and below). You can also pick a preset yourself; use *Fast* on weaker GPUs. In the player, `Ctrl+1`-`Ctrl+6` switch modes and `Ctrl+0` turns the shaders off. Choose *Use my mpv config* to leave shaders to your own mpv setup.
 - **Recently watched** and **Next episode** sit under the link box.
 - **Resume:** doki remembers where you stopped and offers to continue next time.
 - mpv opens on its own, without a console. Tick **Show debug console when playing** to see mpv's debug log when something goes wrong.
