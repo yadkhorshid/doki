@@ -352,6 +352,30 @@ class M3u8App:
         self.settings["debug_console"] = self.debug_var.get()
         save_json("settings.json", self.settings)
 
+    def _video_height(self):
+        """Height of the stream mpv will play, for picking an Anime4K mode."""
+        variants = parse_hls_variants(self.stream_url, self.playlist_text)
+        heights = [variant["height"] for variant in variants if variant["height"]]
+        bitrate = self.quality_options.get(self.quality_var.get())
+        if isinstance(bitrate, int):
+            chosen = [variant["height"] for variant in variants if variant["bandwidth"] == bitrate and variant["height"]]
+            if chosen:
+                return chosen[0]
+        if heights:
+            return max(heights)
+        player_video_size = self.capture_result[3] if self.capture_result else None
+        return player_video_size[1] if player_video_size else None
+
+    def _anime4k_shaders(self):
+        """Returns (shader list or None, short description for the status line)."""
+        choice = self.anime4k_options[self.anime4k_var.get()]
+        if choice != anime4k.AUTO:
+            return choice, ""
+        height = self._video_height()
+        mode = anime4k.mode_for_height(height)
+        detail = f" with Anime4K Mode {mode}" + (f" for {height}p" if height else "")
+        return anime4k.shader_files(mode, "HQ"), detail
+
     def _prefill_from_clipboard(self):
         try:
             text = self.root.clipboard_get().strip()
@@ -664,7 +688,8 @@ class M3u8App:
         ):
             start_position = None
         extra_args = make_resume_arguments(page_url, self.page_title, start_position)
-        extra_args += anime4k.shader_arguments(self.anime4k_options[self.anime4k_var.get()])
+        shaders, anime4k_detail = self._anime4k_shaders()
+        extra_args += anime4k.shader_arguments(shaders)
         debug = self.debug_var.get()
 
         selection = self.subtitle_options[self.subtitle_var.get()]
@@ -743,7 +768,7 @@ class M3u8App:
         self.history = add_history_entry(page_url, self.page_title)
         self._refresh_recents()
         self.status_var.set(
-            "Started mpv" + (" with a debug console." if debug else ". Enjoy!")
+            f"Started mpv{anime4k_detail}" + (" with a debug console." if debug else ". Enjoy!")
         )
 
 

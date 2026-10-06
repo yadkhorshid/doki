@@ -4,6 +4,7 @@ import os
 
 from .paths import app_path
 
+AUTO = "Auto - match the video's resolution"
 USER_CONFIG = "Use my mpv config"
 OFF = "Off"
 
@@ -29,6 +30,15 @@ def preset_label(mode, quality):
     return f"Mode {mode} ({quality})" + (f" - {hint}" if hint else "")
 
 
+def mode_for_height(height):
+    """Anime4K's guidance: Mode A for 1080p, B for 720p, C for 480p and below."""
+    if not height or height >= 900:
+        return "A"
+    if height >= 600:
+        return "B"
+    return "C"
+
+
 def shader_directory():
     return app_path("mpv", "portable_config", "shaders")
 
@@ -46,9 +56,10 @@ def shaders_available():
 
 
 def preset_options():
-    """Returns {label: shader list or None}; None means leave mpv's shaders alone."""
+    """Returns {label: shader list, AUTO or None}; None means leave mpv's shaders alone."""
     options = {}
     if shaders_available():
+        options[AUTO] = AUTO
         for quality in ("HQ", "Fast"):
             for mode in MODES:
                 options[preset_label(mode, quality)] = shader_files(mode, quality)
@@ -58,8 +69,7 @@ def preset_options():
 
 
 def default_preset(options):
-    preferred = preset_label("A", "HQ")
-    return preferred if preferred in options else USER_CONFIG
+    return AUTO if AUTO in options else USER_CONFIG
 
 
 def shader_arguments(shaders):
