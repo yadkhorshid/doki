@@ -24,7 +24,8 @@ Paste an episode or player URL and choose **Find stream**. doki looks for the M3
   - A+A is the highest-quality mode for 1080p, but it's also the heaviest. On a weaker GPU (e.g. laptop integrated graphics) it can stutter or drop frames. If it does, pick *Mode A (HQ)* or one of the *Fast* presets, or press `Ctrl+1` in the player to switch to Mode A.
   - In the player, `Ctrl+1`-`Ctrl+6` switch modes and `Ctrl+0` turns the shaders off. Choose *Use my mpv config* to leave shaders to your own mpv setup.
 - **Subtitles in any language:** the Subtitles list shows every track doki finds, by language (e.g. *Spanish (from playlist)*). doki remembers the language you pick and selects it again next time. It falls back to English, or to no subtitles if neither is available.
-- **Recently watched** and **Next episode** sit under the link box.
+- **Recently watched** and **Next episode** sit under the link box. Recently watched shows how far you got in each episode (e.g. *12:34 / 23:40* or *✓ watched*); pick one and press **✕** to remove it.
+- **Updates:** when a new version is out, doki shows a link under the tagline when it starts.
 - **Resume:** doki remembers where you stopped and offers to continue next time.
 - mpv opens on its own, without a console. If something goes wrong, tick **Show debug console when playing** to see mpv's debug log. On a Mac the option is **Save an mpv debug log when playing**, and doki shows where the log was saved.
 - Settings, history and resume positions are stored in `%APPDATA%\doki` on Windows and `~/Library/Application Support/doki` on a Mac.
@@ -39,7 +40,7 @@ With Python 3.13 and PowerShell installed, run:
 .\build.ps1
 ```
 
-The script installs build requirements, downloads Chromium, the latest mpv build from [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake) and the [Anime4K](https://github.com/bloc97/anime4k) v4.0 shaders, then creates the portable folder and ZIP under `dist`. The package is large because it includes Chromium and mpv.
+The script installs build requirements, downloads Chromium, the official [mpv](https://github.com/mpv-player/mpv/releases) build (pinned to the version set at the top of the script) and the [Anime4K](https://github.com/bloc97/anime4k) v4.0 shaders, then creates the portable folder and ZIP under `dist`. The package is large because it includes Chromium and mpv.
 
 mpv and the shaders are downloaded once into `mpv\` (git-ignored) and reused; pass `-RefreshMpv` to fetch them again. Running from source uses the same folder:
 
@@ -56,7 +57,7 @@ With Python 3.13 (from python.org, which includes Tk) run:
 ./build-macos.sh
 ```
 
-It builds for the Mac's own chip, bundles the official mpv macOS build and the Anime4K shaders, and creates `dist/doki.app` and `dist/doki-macOS-arm64.zip` (or `-intel.zip`). Pass `--refresh-mpv` to download mpv again.
+It builds for the Mac's own chip, bundles the official mpv macOS build (pinned like on Windows) and the Anime4K shaders, and creates `dist/doki.app` and `dist/doki-macOS-arm64.zip` (or `-intel.zip`). Pass `--refresh-mpv` to download mpv again.
 
 ## Releases
 
