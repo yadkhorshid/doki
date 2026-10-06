@@ -4,6 +4,8 @@ import json
 import os
 import sys
 
+IS_MAC = sys.platform == "darwin"
+
 
 def resource_path(*parts):
     root = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,8 +13,10 @@ def resource_path(*parts):
 
 
 def app_path(*parts):
-    """Files shipped next to doki.exe (or the repo root when running from source)."""
-    if getattr(sys, "frozen", False):
+    """Files shipped next to doki.exe, in doki.app's Resources, or in the repo root from source."""
+    if getattr(sys, "frozen", False) and IS_MAC:
+        root = os.path.join(os.path.dirname(sys.executable), os.pardir, "Resources")
+    elif getattr(sys, "frozen", False):
         root = os.path.dirname(sys.executable)
     else:
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,7 +24,10 @@ def app_path(*parts):
 
 
 def data_path(*parts):
-    base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    if IS_MAC:
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
     directory = os.path.join(base, "doki")
     os.makedirs(directory, exist_ok=True)
     return os.path.join(directory, *parts)

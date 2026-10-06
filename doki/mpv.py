@@ -6,7 +6,7 @@ import subprocess
 import threading
 from urllib.parse import urlsplit
 
-from .paths import app_path
+from .paths import IS_MAC, app_path
 
 
 def powershell_quote(value):
@@ -14,9 +14,27 @@ def powershell_quote(value):
     return '"' + escaped + '"'
 
 
+# Where GUI apps on macOS can find mpv, since they don't inherit the shell's PATH.
+MAC_MPV_LOCATIONS = (
+    "/opt/homebrew/bin/mpv",
+    "/usr/local/bin/mpv",
+    "/Applications/mpv.app/Contents/MacOS/mpv",
+)
+
+
 def bundled_mpv_executable():
-    executable = app_path("mpv", "mpv.exe")
+    if IS_MAC:
+        executable = app_path("mpv", "mpv.app", "Contents", "MacOS", "mpv")
+    else:
+        executable = app_path("mpv", "mpv.exe")
     return executable if os.path.isfile(executable) else None
+
+
+def bundled_config_arguments(mpv_executable):
+    """mpv only reads portable_config by itself on Windows, so point the macOS build at it."""
+    if IS_MAC and mpv_executable == bundled_mpv_executable():
+        return [f"--config-dir={app_path('mpv', 'portable_config')}"]
+    return []
 
 
 def find_mpv_executable():
@@ -27,6 +45,8 @@ def find_mpv_executable():
         executable = shutil.which(name)
         if executable:
             return executable
+    if IS_MAC:
+        return next((path for path in MAC_MPV_LOCATIONS if os.path.isfile(path)), None)
     if os.name != "nt":
         return None
 
@@ -177,7 +197,7 @@ def make_mpv_arguments(
     origin = headers.get("origin", "")
     cookie = headers.get("cookie", "")
 
-    args = []
+    args = bundled_config_arguments(mpv_executable)
     if bitrate:
         args.append(f"--hls-bitrate={bitrate}")
     args.append(f"--cache-secs={cache_secs}")

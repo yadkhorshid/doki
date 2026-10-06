@@ -16,8 +16,30 @@ from .capture import capture_page
 from .hls import make_quality_options, parse_hls_playlist, parse_hls_variants
 from .library import add_history_entry, format_timestamp, make_resume_arguments, next_episode_url, read_resume_position
 from .mpv import find_mpv_executable, launch_in_new_powershell, launch_mpv, make_mpv_arguments, make_mpv_command
-from .paths import load_json, resource_path, save_json
+from .paths import IS_MAC, data_path, load_json, resource_path, save_json
 from .subtitles import make_subtitle_options, remove_stale_subtitles, save_captured_subtitle
+
+
+def register_mac_fonts(font_paths):
+    """Makes bundled fonts available to this process through Core Text."""
+    core_foundation = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+    core_text = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreText.framework/CoreText")
+    core_foundation.CFURLCreateFromFileSystemRepresentation.restype = ctypes.c_void_p
+    core_foundation.CFURLCreateFromFileSystemRepresentation.argtypes = (
+        ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_bool,
+    )
+    core_foundation.CFRelease.argtypes = (ctypes.c_void_p,)
+    core_text.CTFontManagerRegisterFontsForURL.restype = ctypes.c_bool
+    core_text.CTFontManagerRegisterFontsForURL.argtypes = (ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
+    for font_path in font_paths:
+        encoded = os.fsencode(font_path)
+        url = core_foundation.CFURLCreateFromFileSystemRepresentation(None, encoded, len(encoded), False)
+        if not url:
+            continue
+        # 1 = kCTFontManagerScopeProcess
+        if not core_text.CTFontManagerRegisterFontsForURL(url, 1, None):
+            print(f"[gui] Could not load bundled font {font_path}", file=sys.stderr)
+        core_foundation.CFRelease(url)
 
 
 class M3u8App:
@@ -39,7 +61,9 @@ class M3u8App:
         root.title("doki")
         root.geometry("840x862")
         root.minsize(720, 862)
-        root.overrideredirect(True)
+        if not IS_MAC:
+            # macOS keeps its native title bar; borderless windows there can't take keyboard focus.
+            root.overrideredirect(True)
         root.configure(bg="#d8cdbd")
 
         style = ttk.Style(root)
@@ -56,6 +80,14 @@ class M3u8App:
                         f"[gui] Could not load bundled font {font_file}: {ctypes.WinError()}",
                         file=sys.stderr,
                     )
+        elif IS_MAC:
+            try:
+                register_mac_fonts([
+                    os.path.join(font_directory, font_file)
+                    for font_file in ("JetBrainsMono-Regular.ttf", "JetBrainsMono-Bold.ttf")
+                ])
+            except (OSError, AttributeError) as error:
+                print(f"[gui] Could not load bundled fonts: {error}", file=sys.stderr)
         available_fonts = set(tkfont.families(root))
         requested_font = next(
             (
@@ -85,6 +117,8 @@ class M3u8App:
                 "Install JetBrains Mono Nerd Font to use it throughout the app.",
                 file=sys.stderr,
             )
+        elif "Menlo" in available_fonts:
+            font_family = "Menlo"
         else:
             font_family = "TkDefaultFont"
             print(
@@ -167,7 +201,8 @@ class M3u8App:
         surface.pack(fill="both", expand=True)
 
         titlebar = tk.Frame(surface, bg=chrome, height=42)
-        titlebar.pack(fill="x")
+        if not IS_MAC:
+            titlebar.pack(fill="x")
         titlebar.pack_propagate(False)
         titlebar.columnconfigure(0, weight=1)
         titlebar.columnconfigure(1, weight=0)
@@ -343,7 +378,7 @@ class M3u8App:
         footer.columnconfigure(0, weight=1)
         ttk.Checkbutton(
             footer,
-            text="Show debug console when playing",
+            text="Save an mpv debug log when playing" if IS_MAC else "Show debug console when playing",
             variable=self.debug_var,
             style="Muted.TCheckbutton",
             command=self._save_debug_setting,
@@ -677,7 +712,9 @@ class M3u8App:
         if not mpv_executable:
             messagebox.showerror(
                 "mpv is required",
-                "Install mpv, then add mpv.exe to PATH or register it with Windows before starting playback.",
+                "Install mpv (for example with `brew install mpv`) before starting playback."
+                if IS_MAC
+                else "Install mpv, then add mpv.exe to PATH or register it with Windows before starting playback.",
                 parent=self.root,
             )
             return
@@ -762,8 +799,13 @@ class M3u8App:
                 "[subtitle-debug] external subtitle supplied from "
                 + ("a captured local file" if cleanup_paths else "its original URL")
             )
+        debug_detail = " with a debug console."
         try:
-            if not debug:
+            if debug and IS_MAC:
+                log_path = data_path("mpv-debug.log")
+                launch_mpv(launch_executable, launch_arguments + [f"--log-file={log_path}"], cleanup_paths)
+                debug_detail = f". Debug log: {log_path}"
+            elif not debug:
                 launch_mpv(launch_executable, launch_arguments, cleanup_paths)
             elif not launch_in_new_powershell(
                 command,
@@ -779,7 +821,7 @@ class M3u8App:
         self.history = add_history_entry(page_url, self.page_title)
         self._refresh_recents()
         self.status_var.set(
-            f"Started mpv{anime4k_detail}" + (" with a debug console." if debug else ". Enjoy!")
+            f"Started mpv{anime4k_detail}" + (debug_detail if debug else ". Enjoy!")
         )
 
 

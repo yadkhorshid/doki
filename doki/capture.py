@@ -5,9 +5,11 @@ import re
 import sys
 import time
 
+from .paths import app_path
+
 
 if getattr(sys, "frozen", False):
-    bundled_browsers = os.path.join(os.path.dirname(sys.executable), "browsers")
+    bundled_browsers = app_path("browsers")
     if os.path.isdir(bundled_browsers):
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = bundled_browsers
 
