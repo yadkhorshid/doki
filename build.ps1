@@ -34,7 +34,11 @@ try {
     New-Item -ItemType Directory -Path $DownloadDirectory, $ShaderDirectory -Force | Out-Null
 
     if (-not (Test-Path -LiteralPath (Join-Path $MpvDirectory "mpv.exe"))) {
-        $Release = Invoke-RestMethod "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+        $ApiHeaders = @{}
+        if ($env:GITHUB_TOKEN) {
+            $ApiHeaders["Authorization"] = "Bearer $env:GITHUB_TOKEN"
+        }
+        $Release = Invoke-RestMethod "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest" -Headers $ApiHeaders
         $Asset = $Release.assets | Where-Object { $_.name -match "^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$" } | Select-Object -First 1
         if (-not $Asset) {
             throw "Could not find an x86_64 mpv build in the latest shinchiro/mpv-winbuild-cmake release."

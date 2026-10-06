@@ -1,0 +1,95 @@
+name: release
+
+# Tags like v2.0.0 build Windows and macOS and publish a GitHub release.
+# Pushes to ci/* branches (and manual runs) only build and test.
+on:
+  push:
+    tags: ["v*"]
+    branches: ["ci/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build
+        shell: pwsh
+        run: .\build.ps1
+      - name: Smoke test
+        run: python tests/smoke_test.py
+      - name: Check the packaged app starts
+        shell: pwsh
+        run: |
+          $app = Start-Process -FilePath "dist\doki\doki.exe" -PassThru
+          Start-Sleep -Seconds 15
+          $app.Refresh()
+          if ($app.HasExited) { throw "doki.exe exited early with code $($app.ExitCode)" }
+          Stop-Process -Id $app.Id -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doki-Windows-x64
+          path: dist/doki-Windows-x64.zip
+          compression-level: 0
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            label: arm64
+          - runner: macos-15-intel
+            label: intel
+    runs-on: ${{ matrix.runner }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build
+        run: |
+          chmod +x build-macos.sh
+          PYTHON=python ./build-macos.sh
+      - name: Smoke test
+        run: python tests/smoke_test.py
+      - name: Check the packaged app starts
+        run: |
+          dist/doki.app/Contents/MacOS/doki &
+          app=$!
+          sleep 15
+          kill -0 "$app" || { echo "doki exited early"; exit 1; }
+          kill "$app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doki-macOS-${{ matrix.label }}
+          path: dist/doki-macOS-${{ matrix.label }}.zip
+          compression-level: 0
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          notes="release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then notes_args=(--notes-file "$notes"); else notes_args=(--generate-notes); fi
+          gh release create "$GITHUB_REF_NAME" dist/*.zip --title "${GITHUB_REF_NAME#v}" "${notes_args[@]}"
