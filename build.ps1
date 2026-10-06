@@ -27,7 +27,7 @@ try {
         --collect-all playwright `
         --collect-all greenlet `
         --collect-all pyee `
-        doki.py
+        main.py
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller failed."
     }

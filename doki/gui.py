@@ -1,615 +1,22 @@
+"""The doki window."""
+
 import base64
 import ctypes
 import os
 import queue
-import re
-import shutil
-import subprocess
 import sys
-import tempfile
 import threading
-import time
 import tkinter as tk
 import tkinter.font as tkfont
-from urllib.parse import urljoin, urlsplit
 from tkinter import messagebox, ttk
+from urllib.parse import urlsplit
 
-if getattr(sys, "frozen", False):
-    bundled_browsers = os.path.join(os.path.dirname(sys.executable), "browsers")
-    if os.path.isdir(bundled_browsers):
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = bundled_browsers
-
-from playwright.sync_api import sync_playwright
-
-
-def resource_path(*parts):
-    root = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(root, *parts)
-
-
-def powershell_quote(value):
-    escaped = value.replace("`", "``").replace('"', '`"').replace("$", "`$")
-    return '"' + escaped + '"'
-
-
-def find_mpv_executable():
-    for name in ("mpv.exe", "mpv"):
-        executable = shutil.which(name)
-        if executable:
-            return executable
-    if os.name != "nt":
-        return None
-
-    import winreg
-
-    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-        try:
-            with winreg.OpenKey(
-                hive, r"Software\Microsoft\Windows\CurrentVersion\App Paths\mpv.exe"
-            ) as key:
-                executable, _ = winreg.QueryValueEx(key, None)
-        except OSError:
-            continue
-        executable = os.path.expandvars(executable.strip('"'))
-        if os.path.isfile(executable):
-            return executable
-    return None
-
-
-def launch_in_new_powershell(
-    command,
-    cleanup_paths=(),
-    debug_messages=(),
-    mpv_executable=None,
-    mpv_arguments=None,
-):
-    if os.name != "nt":
-        return False
-    powershell = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
-    if not powershell:
-        return False
-    script_lines = [
-        f"Write-Host {powershell_quote(message)}"
-        for message in debug_messages
-    ]
-    if cleanup_paths:
-        script_lines.append(
-            'Write-Host "[subtitle-debug] Waiting for mpv process to exit before cleaning temporary subtitles."'
-        )
-        if mpv_executable and mpv_arguments is not None:
-            process_arguments = subprocess.list2cmdline(mpv_arguments)
-            script_lines.extend((
-                "try {",
-                "$mpvStartInfo = New-Object System.Diagnostics.ProcessStartInfo",
-                f"$mpvStartInfo.FileName = {powershell_quote(mpv_executable)}",
-                f"$mpvStartInfo.Arguments = {powershell_quote(process_arguments)}",
-                "$mpvStartInfo.UseShellExecute = $false",
-                "$mpvProcess = [System.Diagnostics.Process]::Start($mpvStartInfo)",
-                'Write-Host ("[subtitle-debug] mpv process started; PID: " + $mpvProcess.Id)',
-                "$mpvProcess.WaitForExit()",
-                'Write-Host ("[subtitle-debug] mpv process exited with code: " + $mpvProcess.ExitCode)',
-                "} finally {",
-            ))
-        else:
-            script_lines.extend(("try {", command, "} finally {"))
-        for path in cleanup_paths:
-            quoted_path = powershell_quote(path)
-            script_lines.extend((
-                f"if (Test-Path -LiteralPath {quoted_path}) {{",
-                f"Remove-Item -LiteralPath {quoted_path} -Force -ErrorAction Stop",
-                f"Write-Host {powershell_quote(f'[subtitle-debug] Removed temporary subtitle: {path}')}",
-                "}",
-            ))
-        script_lines.append("}")
-    else:
-        script_lines.append(command)
-    subprocess.Popen(
-        [powershell, "-NoExit", "-Command", "\n".join(script_lines)],
-        creationflags=subprocess.CREATE_NEW_CONSOLE,
-    )
-    return True
-
-
-def parse_hls_playlist(playlist_url, playlist_text):
-    qualities = set()
-    english_subtitles = []
-
-    for line in playlist_text.splitlines():
-        if line.startswith("#EXT-X-STREAM-INF:"):
-            match = re.search(r"RESOLUTION=\d+x(\d+)", line)
-            if match:
-                qualities.add(int(match.group(1)))
-        elif line.startswith("#EXT-X-MEDIA:"):
-            attributes = {
-                key: quoted or unquoted
-                for key, quoted, unquoted in re.findall(
-                    r'([A-Z0-9-]+)=(?:"([^"]*)"|([^,]*))', line.partition(":")[2]
-                )
-            }
-            if attributes.get("TYPE") != "SUBTITLES":
-                continue
-            language = attributes.get("LANGUAGE", "").lower()
-            name = attributes.get("NAME", "")
-            is_english = language == "eng" or language.startswith("en-") or language == "en"
-            is_english = is_english or re.search(r"\benglish\b", name, re.IGNORECASE) is not None
-            if is_english and attributes.get("URI"):
-                english_subtitles.append(urljoin(playlist_url, attributes["URI"]))
-
-    return sorted(qualities), english_subtitles
-
-
-def parse_hls_variants(playlist_url, playlist_text):
-    variants = []
-    lines = playlist_text.splitlines()
-    for index, line in enumerate(lines):
-        if not line.startswith("#EXT-X-STREAM-INF:"):
-            continue
-        attributes = {
-            key: quoted or unquoted
-            for key, quoted, unquoted in re.findall(
-                r'([A-Z0-9-]+)=(?:"([^"]*)"|([^,]*))', line.partition(":")[2]
-            )
-        }
-        variant_uri = next(
-            (candidate.strip() for candidate in lines[index + 1:] if candidate.strip() and not candidate.startswith("#")),
-            None,
-        )
-        if not variant_uri:
-            continue
-        resolution = re.search(r"RESOLUTION=\d+x(\d+)", line)
-        height = int(resolution.group(1)) if resolution else None
-        try:
-            bandwidth = int(attributes.get("BANDWIDTH") or attributes.get("AVERAGE-BANDWIDTH"))
-        except (TypeError, ValueError):
-            bandwidth = None
-        label = f"{height}p" if height else "Unknown resolution"
-        if bandwidth:
-            label += f" ({bandwidth / 1_000_000:.1f} Mbps)"
-        variants.append({
-            "label": label,
-            "url": urljoin(playlist_url, variant_uri),
-            "height": height,
-            "bandwidth": bandwidth,
-        })
-    return variants
-
-
-def is_english_subtitle(url, headers):
-    content_type = headers.get("content-type", "").lower()
-    disposition = headers.get("content-disposition", "")
-    is_subtitle = is_direct_subtitle_url(url)
-    is_subtitle = is_subtitle or any(
-        kind in content_type
-        for kind in ("text/vtt", "application/x-subrip", "application/ttml+xml")
-    )
-    if not is_subtitle:
-        return False
-
-    language = headers.get("content-language", "")
-    hint = f"{url} {disposition} {language}"
-    return re.search(r"(?:^|[^a-z])(?:en|eng|english)(?:$|[^a-z])", hint, re.IGNORECASE) is not None
-
-
-def is_subtitle_resource(url, headers):
-    if is_direct_subtitle_url(url):
-        return True
-    content_type = headers.get("content-type", "").lower()
-    return any(kind in content_type for kind in (
-        "text/vtt",
-        "application/x-subrip",
-        "application/srt",
-        "application/ttml+xml",
-        "text/x-ssa",
-        "application/ass",
-    ))
-
-
-def is_direct_subtitle_url(url):
-    return re.search(r"\.(?:vtt|srt|ass|ssa)(?:$|[?#])", url, re.IGNORECASE) is not None
-
-
-def webvtt_to_srt(body):
-    lines = body.decode("utf-8-sig", errors="replace").splitlines()
-    cues = []
-    index = 0
-
-    def timestamp_to_srt(timestamp):
-        match = re.fullmatch(r"(?:(\d+):)?(\d{2}):(\d{2})\.(\d{3})", timestamp)
-        if not match:
-            return None
-        hours, minutes, seconds, milliseconds = match.groups()
-        return f"{int(hours or 0):02}:{minutes}:{seconds},{milliseconds}"
-
-    while index < len(lines):
-        line = lines[index].strip()
-        if not line or line.startswith("WEBVTT"):
-            index += 1
-            continue
-        if line.startswith(("NOTE", "STYLE", "REGION")):
-            while index < len(lines) and lines[index].strip():
-                index += 1
-            continue
-        if "-->" not in line:
-            if index + 1 < len(lines) and "-->" in lines[index + 1]:
-                index += 1
-            else:
-                index += 1
-                continue
-
-        start_text, end_text = line.split("-->", 1)
-        start = timestamp_to_srt(start_text.strip())
-        end = timestamp_to_srt(end_text.strip().split()[0])
-        index += 1
-        cue_lines = []
-        while index < len(lines) and lines[index].strip():
-            cue_lines.append(lines[index])
-            index += 1
-        if start and end and cue_lines:
-            cue_number = len(cues) + 1
-            cues.append(f"{cue_number}\n{start} --> {end}\n" + "\n".join(cue_lines))
-
-    return ("\n\n".join(cues) + "\n").encode("utf-8") if cues else None
-
-
-def save_captured_subtitle(url, response):
-    if not response:
-        return None
-    status, _, body = response
-    if not 200 <= status < 300 or not body:
-        return None
-
-    suffix = urlsplit(url).path.rsplit(".", 1)
-    suffix = "." + suffix[-1] if len(suffix) == 2 else ".vtt"
-    if suffix.lower() == ".vtt":
-        if not body.decode("utf-8-sig", errors="replace").lstrip().startswith("WEBVTT"):
-            return None
-        body = webvtt_to_srt(body)
-        if not body:
-            return None
-        suffix = ".srt"
-    with tempfile.NamedTemporaryFile(prefix="open-in-mpv-", suffix=suffix, delete=False) as subtitle_file:
-        subtitle_file.write(body)
-        return subtitle_file.name
-
-
-def inspect_player_frame(frame):
-    try:
-        return frame.evaluate("""() => {
-            const videos = Array.from(document.querySelectorAll('video'));
-            const video = videos.find(item => item.videoWidth && item.videoHeight) || videos[0];
-            if (!video) return null;
-            return {
-                width: video.videoWidth || 0,
-                height: video.videoHeight || 0,
-                subtitles: Array.from(video.querySelectorAll('track')).map(track => ({
-                    url: track.src,
-                    language: track.srclang,
-                    label: track.label
-                }))
-            };
-        }""")
-    except Exception:
-        return None
-
-
-def make_mpv_command(
-    stream_url,
-    headers,
-    page_url,
-    subtitle_urls=(),
-    mpv_executable="mpv",
-    bitrate=None,
-    cache_secs=1300,
-    initial_buffer=8,
-    subtitles_enabled=True,
-):
-    mpv_executable, mpv_arguments = make_mpv_arguments(
-        stream_url,
-        headers,
-        page_url,
-        subtitle_urls,
-        mpv_executable,
-        bitrate,
-        cache_secs,
-        initial_buffer,
-        subtitles_enabled,
-    )
-    executable_command = (
-        "mpv"
-        if mpv_executable == "mpv"
-        else "& " + powershell_quote(mpv_executable)
-    )
-    return " ".join(
-        [executable_command]
-        + [powershell_quote(argument) for argument in mpv_arguments]
-    )
-
-
-def make_mpv_arguments(
-    stream_url,
-    headers,
-    page_url,
-    subtitle_urls=(),
-    mpv_executable="mpv",
-    bitrate=None,
-    cache_secs=1300,
-    initial_buffer=8,
-    subtitles_enabled=True,
-):
-    referer = headers.get("referer", page_url)
-    user_agent = headers.get("user-agent", "")
-    origin = headers.get("origin", "")
-    cookie = headers.get("cookie", "")
-
-    args = []
-    if bitrate:
-        args.append(f"--hls-bitrate={bitrate}")
-    args.append(f"--cache-secs={cache_secs}")
-    args.append("--cache-pause-initial=yes")
-    args.append(f"--cache-pause-wait={initial_buffer}")
-    args.append("--msg-level=all=debug")
-    if subtitles_enabled:
-        args.extend(("--sid=auto", "--slang=en"))
-    else:
-        args.append("--sid=no")
-    if referer:
-        args.append(f"--referrer={referer}")
-    if user_agent:
-        args.append(f"--user-agent={user_agent}")
-
-    extra_headers = []
-    if origin:
-        extra_headers.append(f"Origin: {origin}")
-    if cookie:
-        extra_headers.append(f"Cookie: {cookie}")
-    if extra_headers:
-        args.append("--http-header-fields=" + ",".join(extra_headers))
-
-    subtitle_urls = tuple(subtitle_urls)
-    args.extend("--sub-file=" + url for url in subtitle_urls)
-    if urlsplit(stream_url).path.lower().endswith((".m3u8", ".m3u")):
-        args.append(stream_url)
-    else:
-        args.extend((
-            "--{",
-            "--demuxer-lavf-format=hls",
-            stream_url,
-            "--}",
-        ))
-    return mpv_executable, args
-
-
-def capture_page(page_url, status_callback=None):
-    streams = []
-    stream_activity = []
-    subtitle_candidates = []
-    subtitle_responses = {}
-    player_video_size = None
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        page = browser.new_page()
-
-        def handle_response(response):
-            content_type = response.headers.get("content-type", "").lower()
-            if ".m3u8" in response.url.lower() or "mpegurl" in content_type:
-                try:
-                    playlist_text = response.text()
-                except Exception:
-                    playlist_text = ""
-                streams.append((
-                    response.url,
-                    response.request.all_headers(),
-                    playlist_text,
-                    response.status,
-                    content_type,
-                ))
-                stream_activity.append(time.monotonic())
-            elif is_subtitle_resource(response.url, response.headers):
-                try:
-                    subtitle_body = response.body()
-                except Exception:
-                    subtitle_body = b""
-                subtitle_responses[response.url] = (
-                    response.status,
-                    content_type,
-                    subtitle_body,
-                )
-                subtitle_candidates.append((
-                    response.url,
-                    is_english_subtitle(response.url, response.headers),
-                ))
-
-        page.on("response", handle_response)
-        if status_callback:
-            status_callback("Browser open. Press Play if needed; waiting for a stream (30-second limit).")
-        try:
-            page.goto(page_url, wait_until="domcontentloaded", timeout=45_000)
-        except Exception:
-            pass
-        capture_deadline = time.monotonic() + 30
-        stream_status_sent = False
-        while time.monotonic() < capture_deadline:
-            page.wait_for_timeout(200)
-            if not stream_activity:
-                continue
-            if status_callback and not stream_status_sent:
-                status_callback("Stream found; collecting subtitle tracks briefly.")
-                stream_status_sent = True
-            if time.monotonic() - stream_activity[-1] >= 2:
-                break
-        for frame in page.frames:
-            player_info = inspect_player_frame(frame)
-            if not player_info:
-                continue
-            width = player_info.get("width", 0)
-            height = player_info.get("height", 0)
-            if width and height and not player_video_size:
-                player_video_size = (width, height)
-            for subtitle in player_info.get("subtitles", []):
-                language = subtitle.get("language", "").lower()
-                label = subtitle.get("label", "")
-                is_english = language == "en" or language == "eng" or language.startswith("en-")
-                is_english = is_english or re.search(r"\benglish\b", label, re.IGNORECASE) is not None
-                if is_english and is_direct_subtitle_url(subtitle.get("url", "")):
-                    subtitle_candidates.append((subtitle["url"], True))
-        browser.close()
-
-    return streams, subtitle_candidates, subtitle_responses, player_video_size
-
-
-def make_quality_options(playlist_url, playlist_text):
-    options = [("Auto (mpv default)", None)]
-    variants = parse_hls_variants(playlist_url, playlist_text)
-    if variants:
-        options.append(("Highest available", "max"))
-    for index, variant in enumerate(variants, start=1):
-        if variant["bandwidth"]:
-            label = variant["label"]
-            if sum(item[0] == label for item in options) > 0:
-                label = f"{label} - variant {index}"
-            options.append((label, variant["bandwidth"]))
-    return options
-
-
-def make_subtitle_options(subtitle_candidates, hls_subtitles):
-    options = [("No subtitles", {"kind": "none", "url": None})]
-    if hls_subtitles:
-        options.append(("English subtitles from playlist", {"kind": "playlist", "url": None}))
-
-    languages = {}
-    for subtitle_url, is_english in subtitle_candidates:
-        if subtitle_url not in hls_subtitles:
-            languages[subtitle_url] = languages.get(subtitle_url, False) or is_english
-    for subtitle_url, is_english in languages.items():
-        filename = urlsplit(subtitle_url).path.rsplit("/", 1)[-1] or "subtitle file"
-        language = "English" if is_english else "Unverified"
-        options.append((f"{language} - {filename}", {
-            "kind": "external",
-            "url": subtitle_url,
-            "english": is_english,
-        }))
-    return options
-
-
-def console_main():
-    page_url = input("Paste the anime episode or player URL: ").strip()
-    if not page_url:
-        print("No URL provided.")
-        return
-
-    try:
-        streams, subtitle_candidates, subtitle_responses, player_video_size = capture_page(page_url, print)
-    except Exception as error:
-        print(f"Browser capture failed: {error}")
-        return
-
-    if not streams:
-        print("No HLS playlist was detected. Try an episode/player URL and press Play in the browser window.")
-        return
-
-    stream_url, headers, playlist_text, status, content_type = max(
-        streams,
-        key=lambda item: ("#EXT-X-STREAM-INF:" in item[2], len(item[2])),
-    )
-    qualities, hls_subtitles = parse_hls_playlist(stream_url, playlist_text)
-    candidate_languages = {}
-    for subtitle_url, is_english in subtitle_candidates:
-        if subtitle_url not in hls_subtitles:
-            candidate_languages[subtitle_url] = candidate_languages.get(subtitle_url, False) or is_english
-
-    english_subtitles = [url for url, is_english in candidate_languages.items() if is_english]
-    unknown_subtitles = [url for url, is_english in candidate_languages.items() if not is_english]
-    standalone_subtitles = english_subtitles[:1]
-    subtitle_language_unverified = False
-    if not standalone_subtitles and len(unknown_subtitles) == 1:
-        standalone_subtitles = unknown_subtitles
-        subtitle_language_unverified = True
-    subtitle_source_url = standalone_subtitles[0] if standalone_subtitles else None
-    subtitle_file = save_captured_subtitle(
-        subtitle_source_url, subtitle_responses.get(subtitle_source_url)
-    ) if subtitle_source_url else None
-    if subtitle_file:
-        standalone_subtitles = [subtitle_file]
-
-    print("\nM3U8 URL:")
-    print(stream_url)
-    is_hls_manifest = playlist_text.lstrip().startswith("#EXTM3U")
-    print(f"Playlist response: HTTP {status}, {content_type or 'unknown content type'}")
-    print(f"Valid HLS manifest: {'yes' if is_hls_manifest else 'no'}")
-    if player_video_size:
-        width, height = player_video_size
-        print(f"\nVideo quality: {height}p ({width}x{height}, detected in browser)")
-    elif qualities:
-        quality_labels = [f"{height}p" for height in sorted(qualities, reverse=True)]
-        print(f"\nVideo quality: {quality_labels[0]} (highest available)")
-        print("Available qualities: " + ", ".join(quality_labels))
-    else:
-        print("\nVideo quality: not listed in the HLS playlist")
-    if qualities and player_video_size:
-        quality_labels = [f"{height}p" for height in sorted(qualities, reverse=True)]
-        print("Available qualities: " + ", ".join(quality_labels))
-
-    if hls_subtitles:
-        print("English subtitles: available in the HLS playlist; mpv will prefer English.")
-    elif standalone_subtitles and subtitle_language_unverified:
-        print("Subtitle file detected and included; its language could not be verified as English.")
-    elif standalone_subtitles:
-        print("English subtitle file detected and included in the command.")
-    elif len(unknown_subtitles) > 1:
-        print(f"Found {len(unknown_subtitles)} subtitle responses, but could not safely identify a complete English track.")
-    else:
-        print("English subtitles: none detected; mpv will prefer English if the playlist provides it.")
-    if standalone_subtitles and subtitle_file:
-        status, response_type, _ = subtitle_responses[subtitle_source_url]
-        conversion = " (converted from WebVTT to SubRip)" if urlsplit(subtitle_source_url).path.lower().endswith(".vtt") else ""
-        print(f"Subtitle response: HTTP {status}, {response_type or 'unknown content type'}; saved locally{conversion} as {subtitle_file}")
-    elif standalone_subtitles:
-        subtitle_response = subtitle_responses.get(subtitle_source_url)
-        if subtitle_response:
-            status, response_type, _ = subtitle_response
-            print(f"Subtitle response: HTTP {status}, {response_type or 'unknown content type'}; browser could not save its body.")
-
-    mpv_executable = find_mpv_executable()
-    if not mpv_executable:
-        print("mpv was not found. Install mpv and add it to PATH, or register mpv.exe with Windows.")
-        return
-    launch_executable, launch_arguments = make_mpv_arguments(
-        stream_url,
-        headers,
-        page_url,
-        standalone_subtitles,
-        mpv_executable,
-    )
-    command = make_mpv_command(
-        stream_url,
-        headers,
-        page_url,
-        standalone_subtitles,
-        mpv_executable,
-    )
-    print("\nmpv command:")
-    print(command)
-    if headers.get("cookie"):
-        print("\nThe command includes a session cookie. Keep it private; it may grant access to your account.")
-    try:
-        cleanup_paths = [subtitle_file] if subtitle_file else []
-        debug_messages = [
-            f"[subtitle-debug] HLS English tracks detected: {len(hls_subtitles)}",
-            f"[subtitle-debug] external subtitle candidates detected: {len(candidate_languages)}",
-            f"[subtitle-debug] selected subtitle source: {'external' if standalone_subtitles else 'HLS playlist' if hls_subtitles else 'none'}",
-        ]
-        if launch_in_new_powershell(
-            command,
-            cleanup_paths,
-            debug_messages,
-            launch_executable,
-            launch_arguments,
-        ):
-            print("Started mpv in a new PowerShell window.")
-        else:
-            print("Could not open PowerShell automatically; run the command above manually.")
-    except OSError as error:
-        print(f"Could not launch mpv automatically: {error}")
+from .capture import capture_page
+from .hls import make_quality_options, parse_hls_playlist, parse_hls_variants
+from .library import add_history_entry, format_timestamp, make_resume_arguments, next_episode_url, read_resume_position
+from .mpv import find_mpv_executable, launch_in_new_powershell, make_mpv_arguments, make_mpv_command
+from .paths import load_json, resource_path, save_json
+from .subtitles import make_subtitle_options, save_captured_subtitle
 
 
 class M3u8App:
@@ -623,10 +30,14 @@ class M3u8App:
         self.subtitle_responses = {}
         self.quality_options = {}
         self.subtitle_options = {}
+        self.page_title = ""
+        self.settings = load_json("settings.json", {})
+        self.history = load_json("history.json", [])
+        self.recent_options = {}
 
         root.title("doki")
-        root.geometry("840x742")
-        root.minsize(720, 682)
+        root.geometry("840x790")
+        root.minsize(720, 730)
         root.overrideredirect(True)
         root.configure(bg="#d8cdbd")
 
@@ -736,8 +147,9 @@ class M3u8App:
         self.status_var = tk.StringVar(value="Ready")
         self.quality_var = tk.StringVar(value="Auto (mpv default)")
         self.subtitle_var = tk.StringVar(value="No subtitles")
-        self.cache_var = tk.StringVar(value="1300")
-        self.buffer_var = tk.StringVar(value="8")
+        self.cache_var = tk.StringVar(value=str(self.settings.get("cache_secs", 1300)))
+        self.buffer_var = tk.StringVar(value=str(self.settings.get("initial_buffer", 8)))
+        self.recent_var = tk.StringVar()
 
         shell = tk.Frame(root, bg="#d8cdbd", padx=1, pady=1)
         shell.pack(fill="both", expand=True)
@@ -866,6 +278,12 @@ class M3u8App:
         self.analyze_button = ttk.Button(episode, text="Find stream", command=self.analyze)
         self.analyze_button.grid(row=1, column=1, sticky="ew")
         self.url_entry.bind("<Return>", lambda _event: self.analyze())
+        self.recent_combo = ttk.Combobox(episode, textvariable=self.recent_var, state="readonly")
+        self.recent_combo.grid(row=2, column=0, sticky="ew", padx=(0, 10), pady=(10, 0))
+        self.recent_combo.bind("<<ComboboxSelected>>", self._select_recent)
+        self.next_button = ttk.Button(episode, text="Next episode", command=self.next_episode)
+        self.next_button.grid(row=2, column=1, sticky="ew", pady=(10, 0))
+        self._refresh_recents()
 
         self.progress = ttk.Progressbar(body, mode="indeterminate", length=100, style="Warm.Horizontal.TProgressbar")
         self.progress.grid(row=2, column=0, sticky="ew", pady=(1, 7))
@@ -889,7 +307,7 @@ class M3u8App:
 
         ttk.Label(playback, text="Cache · seconds").grid(row=2, column=0, sticky="w", padx=(0, 14), pady=(0, 6))
         ttk.Label(playback, text="Initial buffer · seconds").grid(row=2, column=1, sticky="w", pady=(0, 6))
-        self.cache_spin = ttk.Spinbox(playback, from_=5, to=180, increment=5, textvariable=self.cache_var, width=10)
+        self.cache_spin = ttk.Spinbox(playback, from_=5, to=1320, increment=5, textvariable=self.cache_var, width=10)
         self.cache_spin.grid(row=3, column=0, sticky="w", padx=(0, 14))
         self.buffer_spin = ttk.Spinbox(playback, from_=0, to=45, increment=1, textvariable=self.buffer_var, width=10)
         self.buffer_spin.grid(row=3, column=1, sticky="w")
@@ -908,6 +326,48 @@ class M3u8App:
         self._taskbar_registered = False
         root.after(100, self._register_custom_taskbar_button)
         self.url_entry.focus_set()
+        self._prefill_from_clipboard()
+
+    def _prefill_from_clipboard(self):
+        try:
+            text = self.root.clipboard_get().strip()
+        except tk.TclError:
+            return
+        parsed = urlsplit(text)
+        if parsed.scheme in ("http", "https") and parsed.netloc and not any(char.isspace() for char in text):
+            self.url_var.set(text)
+            self.status_var.set("Link pasted from your clipboard. Press Find stream when ready.")
+
+    def _refresh_recents(self):
+        self.recent_options = {}
+        for entry in self.history:
+            title = entry.get("title") or urlsplit(entry["url"]).path.strip("/") or entry["url"]
+            label = f"{entry.get('watched', '')}  {title}".strip()
+            if label in self.recent_options:
+                label += f" ({len(self.recent_options)})"
+            self.recent_options[label] = entry["url"]
+        labels = list(self.recent_options)
+        self.recent_combo.configure(values=labels)
+        self.recent_var.set("Recently watched" if labels else "No history yet")
+
+    def _select_recent(self, _event=None):
+        page_url = self.recent_options.get(self.recent_var.get())
+        if page_url:
+            self.url_var.set(page_url)
+            self.url_entry.icursor("end")
+
+    def next_episode(self):
+        page_url = self.url_var.get().strip()
+        next_url = next_episode_url(page_url) if page_url else None
+        if not next_url:
+            messagebox.showinfo(
+                "Next episode",
+                "Couldn't find an episode number in this link. Paste the next episode's link instead.",
+                parent=self.root,
+            )
+            return
+        self.url_var.set(next_url)
+        self.analyze()
 
     def _register_custom_taskbar_button(self):
         if os.name != "nt" or self._taskbar_registered:
@@ -1067,19 +527,22 @@ class M3u8App:
             return
 
         self.capture_result = None
+        self.page_title = ""
         self.start_button.state(["disabled"])
         self.analyze_button.state(["disabled"])
+        self.next_button.state(["disabled"])
         self.status_var.set("Opening the page in a browser...")
         self.progress.start(12)
         threading.Thread(target=self.capture_worker, args=(page_url,), daemon=True).start()
 
     def capture_worker(self, page_url):
         try:
-            result = capture_page(page_url, lambda text: self.events.put(("status", text)))
+            page_info = {}
+            result = capture_page(page_url, lambda text: self.events.put(("status", text)), page_info)
         except Exception as error:
             self.events.put(("error", str(error)))
         else:
-            self.events.put(("result", result))
+            self.events.put(("result", (result, page_info.get("title", ""))))
 
     def poll_events(self):
         while True:
@@ -1092,15 +555,18 @@ class M3u8App:
             elif event == "error":
                 self.progress.stop()
                 self.analyze_button.state(["!disabled"])
+                self.next_button.state(["!disabled"])
                 self.status_var.set("Capture failed")
                 messagebox.showerror("Browser capture failed", payload, parent=self.root)
             else:
                 self.finish_capture(payload)
         self.root.after(100, self.poll_events)
 
-    def finish_capture(self, result):
+    def finish_capture(self, payload):
+        result, self.page_title = payload
         self.progress.stop()
         self.analyze_button.state(["!disabled"])
+        self.next_button.state(["!disabled"])
         streams, subtitle_candidates, subtitle_responses, player_video_size = result
         if not streams:
             self.status_var.set("No HLS stream found. Try again and press Play in the browser if needed.")
@@ -1116,7 +582,8 @@ class M3u8App:
         self.quality_options = dict(make_quality_options(self.stream_url, self.playlist_text))
         quality_labels = list(self.quality_options)
         self.quality_combo.configure(values=quality_labels)
-        self.quality_var.set(quality_labels[0])
+        preferred_quality = self.settings.get("quality")
+        self.quality_var.set(preferred_quality if preferred_quality in quality_labels else quality_labels[0])
 
         subtitle_choices = make_subtitle_options(subtitle_candidates, hls_subtitles)
         self.subtitle_options = {label: selection for label, selection in subtitle_choices}
@@ -1131,6 +598,8 @@ class M3u8App:
                 (label for label, selection in subtitle_choices if selection.get("english")),
                 subtitle_labels[0],
             )
+        if self.settings.get("subtitles") == "none":
+            preferred_subtitle = "No subtitles"
         self.subtitle_var.set(preferred_subtitle)
 
         variant_count = len(parse_hls_variants(self.stream_url, self.playlist_text))
@@ -1162,7 +631,24 @@ class M3u8App:
             messagebox.showerror("Invalid buffering options", str(error), parent=self.root)
             return
 
+        page_url = self.url_var.get().strip()
+        start_position = read_resume_position(page_url)
+        if start_position and not messagebox.askyesno(
+            "Resume?",
+            f"You stopped at {format_timestamp(start_position)} last time. Resume from there?",
+            parent=self.root,
+        ):
+            start_position = None
+        extra_args = make_resume_arguments(page_url, self.page_title, start_position)
+
         selection = self.subtitle_options[self.subtitle_var.get()]
+        self.settings.update({
+            "cache_secs": cache_secs,
+            "initial_buffer": initial_buffer,
+            "quality": self.quality_var.get(),
+            "subtitles": "none" if selection["kind"] == "none" else "auto",
+        })
+        save_json("settings.json", self.settings)
         subtitle_urls = ()
         cleanup_paths = []
         subtitles_enabled = selection["kind"] != "none"
@@ -1184,6 +670,7 @@ class M3u8App:
             cache_secs=cache_secs,
             initial_buffer=initial_buffer,
             subtitles_enabled=subtitles_enabled,
+            extra_args=extra_args,
         )
         launch_executable, launch_arguments = make_mpv_arguments(
             self.stream_url,
@@ -1195,6 +682,7 @@ class M3u8App:
             cache_secs=cache_secs,
             initial_buffer=initial_buffer,
             subtitles_enabled=subtitles_enabled,
+            extra_args=extra_args,
         )
         _, subtitle_candidates, _, _ = self.capture_result
         _, hls_subtitles = parse_hls_playlist(self.stream_url, self.playlist_text)
@@ -1221,6 +709,8 @@ class M3u8App:
         except OSError as error:
             messagebox.showerror("Could not start mpv", str(error), parent=self.root)
             return
+        self.history = add_history_entry(page_url, self.page_title)
+        self._refresh_recents()
         self.status_var.set("Started mpv in a new PowerShell window.")
 
 
@@ -1228,10 +718,3 @@ def main():
     root = tk.Tk()
     M3u8App(root)
     root.mainloop()
-
-
-if __name__ == "__main__":
-    if "--cli" in sys.argv[1:]:
-        console_main()
-    else:
-        main()
