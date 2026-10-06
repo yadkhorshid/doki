@@ -35,15 +35,42 @@ def inspect_player_frame(frame):
         return None
 
 
+PLAY_VIDEOS_SCRIPT = """() => {
+    for (const video of document.querySelectorAll('video')) {
+        video.muted = true;
+        video.play().catch(() => {});
+    }
+}"""
+
+
 def capture_page(page_url, status_callback=None, page_info=None):
+    """Captures in a hidden browser first, then in a visible one if nothing was found."""
+    with sync_playwright() as p:
+        if status_callback:
+            status_callback("Looking for the stream in the background...")
+        result = capture_once(p, page_url, None, page_info, headless=True, timeout=20)
+        if result[0]:
+            return result
+        if status_callback:
+            status_callback("Couldn't find it in the background. Press Play in the browser if needed (30-second limit).")
+        return capture_once(p, page_url, status_callback, page_info, headless=False, timeout=30)
+
+
+def capture_once(p, page_url, status_callback, page_info, headless, timeout):
     streams = []
     stream_activity = []
     subtitle_candidates = []
     subtitle_responses = {}
     player_video_size = None
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        page = browser.new_page()
+    browser = p.chromium.launch(
+        headless=headless,
+        # The full Chromium build in new headless mode looks like a normal browser to most players.
+        channel="chromium" if headless else None,
+        args=["--autoplay-policy=no-user-gesture-required", "--mute-audio"],
+    )
+    try:
+        context = browser.new_context()
+        page = context.new_page()
 
         def handle_response(response):
             content_type = response.headers.get("content-type", "").lower()
@@ -76,17 +103,23 @@ def capture_page(page_url, status_callback=None, page_info=None):
                 ))
 
         page.on("response", handle_response)
-        if status_callback:
-            status_callback("Browser open. Press Play if needed; waiting for a stream (30-second limit).")
         try:
             page.goto(page_url, wait_until="domcontentloaded", timeout=45_000)
         except Exception:
             pass
-        capture_deadline = time.monotonic() + 30
+        capture_deadline = time.monotonic() + timeout
+        next_play_attempt = 0
         stream_status_sent = False
         while time.monotonic() < capture_deadline:
             page.wait_for_timeout(200)
             if not stream_activity:
+                if time.monotonic() >= next_play_attempt:
+                    next_play_attempt = time.monotonic() + 2
+                    for frame in page.frames:
+                        try:
+                            frame.evaluate(PLAY_VIDEOS_SCRIPT)
+                        except Exception:
+                            pass
                 continue
             if status_callback and not stream_status_sent:
                 status_callback("Stream found; collecting subtitle tracks briefly.")
@@ -113,6 +146,7 @@ def capture_page(page_url, status_callback=None, page_info=None):
                 page_info["title"] = page.title().strip()
             except Exception:
                 page_info["title"] = ""
+    finally:
         browser.close()
 
     return streams, subtitle_candidates, subtitle_responses, player_video_size
