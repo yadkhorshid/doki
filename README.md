@@ -6,11 +6,12 @@ doki was created to make watching anime with [Anime4K](https://github.com/bloc97
 
 Download `doki-Windows-x64.zip` from the latest GitHub release, extract the whole folder, and double-click **doki.exe**. Everything is bundled: Chromium, mpv, the Anime4K shaders and JetBrains Mono Nerd Font. You don't need to install anything or edit an `mpv.conf`.
 
-Paste an episode or player URL and choose **Find stream**. You don't need to play the stream, as the app *should* find the M3U8 and English subs (if available) anyways!
+Paste an episode or player URL and choose **Find stream**. doki looks for the M3U8 and English subs (if available) in a hidden browser with ads and popups blocked. If it can't find them, it opens the browser so you can press Play.
 
-- **Anime4K upscaling:** pick a preset in the app (Mode A for most 1080p anime, B for 720p or softer sources, C for 480p or noisy sources; use *Fast* on weaker GPUs). In the player, `Ctrl+1`-`Ctrl+6` switch modes and `Ctrl+0` turns the shaders off. Choose *Use my mpv config* to leave shaders to your own mpv setup.
+- **Anime4K upscaling:** *Auto* picks the mode from the stream's resolution (Mode A for 1080p, B for 720p, C for 480p and below). You can also pick a preset yourself; use *Fast* on weaker GPUs. In the player, `Ctrl+1`-`Ctrl+6` switch modes and `Ctrl+0` turns the shaders off. Choose *Use my mpv config* to leave shaders to your own mpv setup.
 - **Recently watched** and **Next episode** sit under the link box.
 - **Resume:** doki remembers where you stopped and offers to continue next time.
+- mpv opens on its own, without a console. Tick **Show debug console when playing** to see mpv's debug log when something goes wrong.
 - Settings, history and resume positions are stored in `%APPDATA%\doki`.
 
 doki uses its bundled mpv and falls back to an mpv on `PATH` (or registered with Windows) if the bundled one is missing.
@@ -32,6 +33,6 @@ python -m doki          # GUI
 python -m doki --cli    # console mode
 ```
 
-The code lives in the `doki` package: `capture` (Chromium stream capture), `hls`, `subtitles`, `mpv` (finding/launching mpv), `anime4k` (shader presets), `library` (history, next episode, resume), `gui` and `cli`.
+The code lives in the `doki` package: `capture` (Chromium stream capture), `adblock`, `hls`, `subtitles`, `mpv` (finding/launching mpv), `anime4k` (shader presets), `library` (history, next episode, resume), `gui` and `cli`.
 
 The bundled JetBrains Mono Nerd Font is distributed under the SIL Open Font License; see `assets/jetbrains mono nerd font/LICENSE.txt`. mpv is GPLv2+ and Anime4K is MIT licensed; see `mpv/LICENSE-NOTICE.txt` in the release.
