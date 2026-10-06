@@ -1,0 +1,13 @@
+<!doctype html><title>Test Episode 7</title>
+<video id="v" controls width="640"></video>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<script src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+<script>
+  // Load the stream only when playback starts, like many players do.
+  const v = document.getElementById('v');
+  v.addEventListener('play', () => {
+    if (v.dataset.loaded) return; v.dataset.loaded = 1;
+    const h = new Hls(); h.loadSource('https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'); h.attachMedia(v);
+  });
+  window.open('https://example.com/popunder', '_blank');
+</script>
