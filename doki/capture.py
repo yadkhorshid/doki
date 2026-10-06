@@ -12,6 +12,7 @@ if getattr(sys, "frozen", False):
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = bundled_browsers
 
 from playwright.sync_api import sync_playwright
+from .adblock import block_ads
 from .subtitles import is_direct_subtitle_url, is_english_subtitle, is_subtitle_resource
 
 
@@ -70,6 +71,7 @@ def capture_once(p, page_url, status_callback, page_info, headless, timeout):
     )
     try:
         context = browser.new_context()
+        block_ads(context)
         page = context.new_page()
 
         def handle_response(response):
